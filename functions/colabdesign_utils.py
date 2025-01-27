@@ -5,6 +5,7 @@
 import os, re, shutil, math, pickle
 import matplotlib.pyplot as plt
 import numpy as np
+from typing import List,Dict,Tuple
 import jax
 import jax.numpy as jnp
 from scipy.special import softmax
@@ -13,12 +14,66 @@ from colabdesign.mpnn import mk_mpnn_model
 from colabdesign.af.alphafold.common import residue_constants
 from colabdesign.af.loss import get_ptm, mask_loss, get_dgram_bins, _get_con_loss
 from colabdesign.shared.utils import copy_dict
-from .biopython_utils import hotspot_residues, calculate_clash_score, calc_ss_percentage, calculate_percentages
-from .pyrosetta_utils import pr_relax, align_pdbs
-from .generic_utils import update_failures
+from .biopython_utils import hotspot_residues, calculate_clash_score, calc_ss_percentage, calculate_percentages,target_pdb_rmsd
+from .pyrosetta_utils import pr_relax, align_pdbs,unaligned_rmsd,score_interface
+from .generic_utils import update_failures,BasicDict
+
+def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
+  '''add cyclic offset to connect N and C term'''
+  def cyclic_offset(L):
+    i = np.arange(L)
+    ij = np.stack([i,i+L],-1)
+    offset = i[:,None] - i[None,:]
+    c_offset = np.abs(ij[:,None,:,None] - ij[None,:,None,:]).min((2,3))
+    if offset_type == 1:
+      c_offset = c_offset
+    elif offset_type >= 2:
+      a = c_offset < np.abs(offset)
+      c_offset[a] = -c_offset[a]
+    if offset_type == 3:
+      idx = np.abs(c_offset) > 2
+      c_offset[idx] = (32 * c_offset[idx] )/  abs(c_offset[idx])
+    return c_offset * np.sign(offset)
+  idx = self._inputs["residue_index"]
+  offset = np.array(idx[:,None] - idx[None,:])
+
+  if self.protocol == "binder":
+    c_offset = cyclic_offset(self._binder_len)
+    offset[self._target_len:,self._target_len:] = c_offset
+
+  elif self.protocol in ["fixbb","hallucination"]:
+    Ln = 0
+    for L in self._lengths:
+      offset[Ln:Ln+L,Ln:Ln+L] = cyclic_offset(L)
+      Ln += L
+  
+  elif self.protocol=="partial":
+    print("Under Construction")
+    raise NotImplementedError
+  else:
+    raise ValueError
+  
+  self._inputs["offset"] = offset
+
+# def add_rg_loss(self:mk_afdesign_model, weight=0.1):
+#   '''add radius of gyration loss'''
+#   def loss_fn(inputs, outputs):
+#     xyz = outputs["structure_module"]
+#     ca = xyz["final_atom_positions"][:,residue_constants.atom_order["CA"]]
+#     rg = jnp.sqrt(jnp.square(ca - ca.mean(0)).sum(-1).mean() + 1e-8)
+#     rg_th = 2.38 * ca.shape[0] ** 0.365
+#     rg = jax.nn.elu(rg - rg_th)
+#     return {"rg":rg}
+#   self._callbacks["model"]["loss"].append(loss_fn)
+#   self.opt["weights"]["rg"] = weight
 
 # hallucinate a binder
-def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residues, length, seed, helicity_value, design_models, advanced_settings, design_paths, failure_csv):
+def binder_hallucination(design_name:str, starting_pdb:str, chain:str, 
+                    target_hotspot_residues:str, length:int, seed:int, helicity_value:float, 
+                    design_models:List[int], advanced_settings:BasicDict, 
+                    design_paths:Dict[str,str], failure_csv:str,
+                    ):
+    # from pdb import set_trace; set_trace()
     model_pdb_path = os.path.join(design_paths["Trajectory"], design_name+".pdb")
 
     # clear GPU memory for new trajectory
@@ -35,7 +90,9 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
 
     af_model.prep_inputs(pdb_filename=starting_pdb, chain=chain, binder_len=length, hotspot=target_hotspot_residues, seed=seed, rm_aa=advanced_settings["omit_AAs"],
                         rm_target_seq=advanced_settings["rm_template_seq_design"], rm_target_sc=advanced_settings["rm_template_sc_design"])
-
+    if advanced_settings.get('cyc_design',False):
+        # To implement: multi-chain target, scaffolding.
+        add_cyclic_offset(af_model, offset_type=2)
     ### Update weights based on specified settings
     af_model.opt["weights"].update({"pae":advanced_settings["weights_pae_intra"],
                                     "plddt":advanced_settings["weights_plddt"],
@@ -100,7 +157,7 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
         initial_plddt = get_best_plddt(af_model, length)
         
         # if best iteration has high enough confidence then continue
-        if initial_plddt > 0.65:
+        if initial_plddt > advanced_settings.get('day0_initial_plddt',0.65):
             print("Initial trajectory pLDDT good, continuing: "+str(initial_plddt))
             if advanced_settings["optimise_beta"]:
                 # temporarily dump model to assess secondary structure
@@ -139,7 +196,7 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
                 softmax_plddt = logit_plddt
 
             # perform one hot encoding
-            if softmax_plddt > 0.65:
+            if softmax_plddt > advanced_settings.get('day0_softmax_plddt',0.65):
                 print("Softmax trajectory pLDDT good, continuing: "+str(softmax_plddt))
                 if advanced_settings["hard_iterations"] > 0:
                     af_model.clear_best()
@@ -148,7 +205,7 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
                                     sample_models=advanced_settings["sample_models"], dropout=False, ramp_recycles=False, save_best=True)
                     onehot_plddt = get_best_plddt(af_model, length)
 
-                if onehot_plddt > 0.65:
+                if onehot_plddt > advanced_settings.get('day0_onehot_plddt',0.65):
                     # perform greedy mutation optimisation
                     print("One-hot trajectory pLDDT good, continuing: "+str(onehot_plddt))
                     if advanced_settings["greedy_iterations"] > 0:
@@ -184,15 +241,15 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
     #clash_interface = calculate_clash_score(model_pdb_path, 2.4)
     ca_clashes = calculate_clash_score(model_pdb_path, 2.5, only_ca=True)
 
-    #if clash_interface > 25 or ca_clashes > 0:
-    if ca_clashes > 0:
+    #if clash_interface > 25 (legacy) or ca_clashes > 0:
+    if ca_clashes > advanced_settings.get('day0_ca_clashes',0):
         af_model.aux["log"]["terminate"] = "Clashing"
         update_failures(failure_csv, 'Trajectory_Clashes')
         print("Severe clashes detected, skipping analysis and MPNN optimisation")
         print("")
     else:
         # check if low quality prediction
-        if final_plddt < 0.7:
+        if final_plddt < advanced_settings.get('day0_final_plddt',0):
             af_model.aux["log"]["terminate"] = "LowConfidence"
             update_failures(failure_csv, 'Trajectory_final_pLDDT')
             print("Trajectory starting confidence low, skipping analysis and MPNN optimisation")
@@ -203,7 +260,7 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
             binder_contacts_n = len(binder_contacts.items())
 
             # if less than 3 contacts then protein is floating above and is not binder
-            if binder_contacts_n < 3:
+            if binder_contacts_n < advanced_settings.get('day0_binder_contacts_n',3):
                 af_model.aux["log"]["terminate"] = "LowConfidence"
                 update_failures(failure_csv, 'Trajectory_Contacts')
                 print("Too few contacts at the interface, skipping analysis and MPNN optimisation")
@@ -236,8 +293,42 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
     return af_model
 
 # run prediction for binder with masked template target
-def predict_binder_complex(prediction_model, binder_sequence, mpnn_design_name, target_pdb, chain, length, trajectory_pdb, prediction_models, advanced_settings, filters, design_paths, failure_csv, seed=None):
-    prediction_stats = {}
+def predict_binder_complex(
+        prediction_model:mk_afdesign_model|None, binder_sequence:str, mpnn_design_name:str, 
+        target_pdb:str|None, chain:str|None, length:int|None, trajectory_pdb:str|None, prediction_models:list[int], 
+        advanced_settings:BasicDict, filters:Dict[str,Dict[str,bool|None]], 
+        design_paths:Dict[str,str], failure_csv:str, seed:int|None=None,
+        binder_chain:str = "B"
+        )->Tuple[Dict[str,BasicDict],bool]|Tuple[Dict[str,BasicDict],bool,mk_afdesign_model]:
+    '''
+    In House Modification:
+    Now init prediction_model inside the function and return it 
+    if it's None as input.  
+
+    (low priority) 
+    MPNN & MPNN/Relaxed paths are hardcoded. try make it flexible.
+    '''
+    length=len(binder_sequence) if length is None else length
+    if prediction_model is None:
+        prediction_model = mk_afdesign_model(
+            protocol="binder", 
+            num_recycles=advanced_settings["num_recycles_validation"],
+            data_dir=advanced_settings["af_params_dir"],
+            use_multimer=advanced_settings["use_multimer_design"])
+        ret_m=True
+    else:
+        ret_m=False
+    prediction_model.prep_inputs(
+            pdb_filename=target_pdb, 
+            chain=chain, 
+            binder_len=length, 
+            rm_target_seq=advanced_settings["rm_template_seq_predict"],
+            rm_target_sc=advanced_settings["rm_template_sc_predict"],
+            seed=seed)
+    if advanced_settings.get('cyc_design',False):
+        # To implement: multi-chain target, scaffolding.
+        add_cyclic_offset(prediction_model, offset_type=2)
+    prediction_stats:Dict[str,BasicDict] = {}
 
     # clean sequence
     binder_sequence = re.sub("[^A-Z]", "", binder_sequence.upper())
@@ -252,7 +343,8 @@ def predict_binder_complex(prediction_model, binder_sequence, mpnn_design_name, 
         complex_pdb = os.path.join(design_paths["MPNN"], f"{mpnn_design_name}_model{model_num+1}.pdb")
         if not os.path.exists(complex_pdb):
             # predict model
-            prediction_model.predict(seq=binder_sequence, models=[model_num], num_recycles=advanced_settings["num_recycles_validation"], verbose=False)
+            prediction_model.predict(seq=binder_sequence, models=[model_num], 
+                num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
             prediction_model.save_pdb(complex_pdb)
             prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
 
@@ -299,14 +391,79 @@ def predict_binder_complex(prediction_model, binder_sequence, mpnn_design_name, 
         if pass_af2_filters:
             mpnn_relaxed = os.path.join(design_paths["MPNN/Relaxed"], f"{mpnn_design_name}_model{model_num+1}.pdb")
             pr_relax(complex_pdb, mpnn_relaxed)
+            num_clashes_mpnn = calculate_clash_score(complex_pdb)
+            num_clashes_mpnn_relaxed = calculate_clash_score(mpnn_relaxed)
+            # analyze interface scores for relaxed af2 trajectory
+            mpnn_interface_scores, mpnn_interface_AA, mpnn_interface_residues = score_interface(mpnn_relaxed, binder_chain)
+            # secondary structure content of starting trajectory binder
+            (mpnn_alpha, mpnn_beta, mpnn_loops, mpnn_alpha_interface, 
+             mpnn_beta_interface, mpnn_loops_interface, mpnn_i_plddt, mpnn_ss_plddt 
+             )= calc_ss_percentage(complex_pdb, advanced_settings, binder_chain)
+            # unaligned RMSD calculate to determine if binder is in the designed binding site
+            rmsd_site = -1. if trajectory_pdb is None else unaligned_rmsd(trajectory_pdb, complex_pdb, binder_chain, binder_chain) 
+            # calculate RMSD of target compared to input PDB
+            target_rmsd = target_pdb_rmsd(complex_pdb, target_pdb, chain)
+
+            prediction_stats[model_num+1].update({
+                'i_pLDDT': mpnn_i_plddt,
+                'ss_pLDDT': mpnn_ss_plddt,
+                'Unrelaxed_Clashes': num_clashes_mpnn,
+                'Relaxed_Clashes': num_clashes_mpnn_relaxed,
+                'Binder_Energy_Score': mpnn_interface_scores['binder_score'],
+                'Surface_Hydrophobicity': mpnn_interface_scores['surface_hydrophobicity'],
+                'ShapeComplementarity': mpnn_interface_scores['interface_sc'],
+                'PackStat': mpnn_interface_scores['interface_packstat'],
+                'dG': mpnn_interface_scores['interface_dG'],
+                'dSASA': mpnn_interface_scores['interface_dSASA'],
+                'dG/dSASA': mpnn_interface_scores['interface_dG_SASA_ratio'],
+                'Interface_SASA_%': mpnn_interface_scores['interface_fraction'],
+                'Interface_Hydrophobicity': mpnn_interface_scores['interface_hydrophobicity'],
+                'n_InterfaceResidues': mpnn_interface_scores['interface_nres'],
+                'n_InterfaceHbonds': mpnn_interface_scores['interface_interface_hbonds'],
+                'InterfaceHbondsPercentage': mpnn_interface_scores['interface_hbond_percentage'],
+                'n_InterfaceUnsatHbonds': mpnn_interface_scores['interface_delta_unsat_hbonds'],
+                'InterfaceUnsatHbondsPercentage': mpnn_interface_scores['interface_delta_unsat_hbonds_percentage'],
+                'InterfaceAAs': mpnn_interface_AA,
+                'Interface_Helix%': mpnn_alpha_interface,
+                'Interface_BetaSheet%': mpnn_beta_interface,
+                'Interface_Loop%': mpnn_loops_interface,
+                'Binder_Helix%': mpnn_alpha,
+                'Binder_BetaSheet%': mpnn_beta,
+                'Binder_Loop%': mpnn_loops,
+                'Hotspot_RMSD': rmsd_site,
+                'Target_RMSD': target_rmsd
+            })
         else:
             if os.path.exists(complex_pdb):
                 os.remove(complex_pdb)
-
-    return prediction_stats, pass_af2_filters
+    ret=(prediction_stats, pass_af2_filters,prediction_model) if ret_m else (prediction_stats, pass_af2_filters)
+    return ret
 
 # run prediction for binder alone
-def predict_binder_alone(prediction_model, binder_sequence, mpnn_design_name, length, trajectory_pdb, binder_chain, prediction_models, advanced_settings, design_paths, seed=None):
+def predict_binder_alone(
+        prediction_model:mk_afdesign_model|None, binder_sequence:str, mpnn_design_name:str, 
+        length:int|None, trajectory_pdb:str|None, binder_chain:str|None, prediction_models:List[int], 
+        advanced_settings:BasicDict, design_paths:str, seed:int|None=None
+        )->Dict[str,BasicDict]|Tuple[Dict[str,BasicDict],mk_afdesign_model]:
+    '''
+    In House Modification:
+    Now init prediction_model inside the function and return it 
+    if it's None as input.  
+    '''
+    length=len(binder_sequence) if length is None else length
+    if prediction_model is None:
+        prediction_model=mk_afdesign_model( 
+            protocol="hallucination", use_templates=False, initial_guess=False,
+            use_initial_atom_pos=False, num_recycles=advanced_settings["num_recycles_validation"],
+            data_dir=advanced_settings["af_params_dir"], use_multimer=advanced_settings["use_multimer_design"])
+        
+        ret_m=True
+    else:
+        ret_m=False
+    prediction_model.prep_inputs(length=length,seed=seed)
+    if advanced_settings.get('cyc_design',False):
+        # To implement: multi-chain target, scaffolding.
+        add_cyclic_offset(prediction_model, offset_type=2)
     binder_stats = {}
 
     # prepare sequence for prediction
@@ -319,25 +476,32 @@ def predict_binder_alone(prediction_model, binder_sequence, mpnn_design_name, le
         binder_alone_pdb = os.path.join(design_paths["MPNN/Binder"], f"{mpnn_design_name}_model{model_num+1}.pdb")
         if not os.path.exists(binder_alone_pdb):
             # predict model
-            prediction_model.predict(models=[model_num], num_recycles=advanced_settings["num_recycles_validation"], verbose=False)
+            prediction_model.predict(models=[model_num], 
+                    num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
             prediction_model.save_pdb(binder_alone_pdb)
             prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, pae
 
-            # align binder model to trajectory binder
-            align_pdbs(trajectory_pdb, binder_alone_pdb, binder_chain, "A")
-
+            
             # extract the statistics for the model
             stats = {
                 'pLDDT': round(prediction_metrics['plddt'], 2), 
                 'pTM': round(prediction_metrics['ptm'], 2), 
-                'pAE': round(prediction_metrics['pae'], 2)
+                'pAE': round(prediction_metrics['pae'], 2),
             }
+            # align binder model to trajectory binder
+            if trajectory_pdb is not None and binder_chain is not None:
+                align_pdbs(trajectory_pdb, binder_alone_pdb, binder_chain, "A")
+                rmsd_binder = unaligned_rmsd(trajectory_pdb, binder_alone_pdb, binder_chain, "A")
+                stats.update({'Binder_RMSD': rmsd_binder})
+            else:
+                stats.update({'Binder_RMSD': None})
             binder_stats[model_num+1] = stats
-
-    return binder_stats
+    ret = (binder_stats,prediction_model) if ret_m else binder_stats
+    return ret
 
 # run MPNN to generate sequences for binders
-def mpnn_gen_sequence(trajectory_pdb, binder_chain, trajectory_interface_residues, advanced_settings):
+def mpnn_gen_sequence(trajectory_pdb:str, binder_chain:str, trajectory_interface_residues:str, 
+    advanced_settings:BasicDict):
     # clear GPU memory
     clear_mem()
 
@@ -366,7 +530,7 @@ def get_best_plddt(af_model, length):
     return round(np.mean(af_model._tmp["best"]["aux"]["plddt"][-length:]),2)
 
 # Define radius of gyration loss for colabdesign
-def add_rg_loss(self, weight=0.1):
+def add_rg_loss(self:mk_afdesign_model, weight=0.1):
     '''add radius of gyration loss'''
     def loss_fn(inputs, outputs):
         xyz = outputs["structure_module"]
@@ -382,7 +546,7 @@ def add_rg_loss(self, weight=0.1):
     self.opt["weights"]["rg"] = weight
 
 # Define interface pTM loss for colabdesign
-def add_i_ptm_loss(self, weight=0.1):
+def add_i_ptm_loss(self:mk_afdesign_model, weight=0.1):
     def loss_iptm(inputs, outputs):
         p = 1 - get_ptm(inputs, outputs, interface=True)
         i_ptm = mask_loss(p)
@@ -392,7 +556,7 @@ def add_i_ptm_loss(self, weight=0.1):
     self.opt["weights"]["i_ptm"] = weight
 
 # add helicity loss
-def add_helix_loss(self, weight=0):
+def add_helix_loss(self:mk_afdesign_model, weight=0):
     def binder_helicity(inputs, outputs):  
       if "offset" in inputs:
         offset = inputs["offset"]
@@ -403,7 +567,8 @@ def add_helix_loss(self, weight=0):
       # define distogram
       dgram = outputs["distogram"]["logits"]
       dgram_bins = get_dgram_bins(outputs)
-      mask_2d = np.outer(np.append(np.zeros(self._target_len), np.ones(self._binder_len)), np.append(np.zeros(self._target_len), np.ones(self._binder_len)))
+      mask_2d = np.outer(np.append(np.zeros(self._target_len), 
+            np.ones(self._binder_len)), np.append(np.zeros(self._target_len), np.ones(self._binder_len)))
 
       x = _get_con_loss(dgram, dgram_bins, cutoff=6.0, binary=True)
       if offset is None:
@@ -422,7 +587,7 @@ def add_helix_loss(self, weight=0):
     self.opt["weights"]["helix"] = weight
 
 # add N- and C-terminus distance loss
-def add_termini_distance_loss(self, weight=0.1, threshold_distance=7.0):
+def add_termini_distance_loss(self:mk_afdesign_model, weight=0.1, threshold_distance=7.0):
     '''Add loss penalizing the distance between N and C termini'''
     def loss_fn(inputs, outputs):
         xyz = outputs["structure_module"]
@@ -440,7 +605,8 @@ def add_termini_distance_loss(self, weight=0.1, threshold_distance=7.0):
         deviation = jax.nn.elu(termini_distance - threshold_distance)
 
         # Ensure the loss is never lower than 0
-        termini_distance_loss = jax.nn.relu(deviation)
+        # termini_distance_loss = jax.nn.relu(deviation)
+        termini_distance_loss = deviation+1
         return {"NC": termini_distance_loss}
 
     # Append the loss function to the model callbacks
@@ -448,7 +614,7 @@ def add_termini_distance_loss(self, weight=0.1, threshold_distance=7.0):
     self.opt["weights"]["NC"] = weight
 
 # plot design trajectory losses
-def plot_trajectory(af_model, design_name, design_paths):
+def plot_trajectory(af_model:mk_afdesign_model, design_name, design_paths):
     metrics_to_plot = ['loss', 'plddt', 'ptm', 'i_ptm', 'con', 'i_con', 'pae', 'i_pae', 'rg', 'mpnn']
     colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
 

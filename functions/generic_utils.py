@@ -11,7 +11,8 @@ import random
 import math
 import pandas as pd
 import numpy as np
-
+from typing import List,Tuple,Dict
+BasicDict=Dict[str,str|bool|int|float]
 # Define labels for dataframes
 def generate_dataframe_labels():
     # labels for trajectory
@@ -38,7 +39,7 @@ def generate_dataframe_labels():
     return trajectory_labels, design_labels, final_labels
 
 # Create base directions of the project
-def generate_directories(design_path):
+def generate_directories(design_path)->Dict[str,str]:
     design_path_names = ["Accepted", "Accepted/Ranked", "Accepted/Animation", "Accepted/Plots", "Accepted/Pickle", "Trajectory",
                         "Trajectory/Relaxed", "Trajectory/Plots", "Trajectory/Clashing", "Trajectory/LowConfidence", "Trajectory/Animation",
                         "MPNN", "MPNN/Binder", "MPNN/Sequences", "MPNN/Relaxed", "Rejected"]
@@ -230,7 +231,7 @@ def perform_input_check(args):
     return args.settings, args.filters, args.advanced
 
 # check specific advanced settings
-def perform_advanced_settings_check(advanced_settings, bindcraft_folder):
+def perform_advanced_settings_check(advanced_settings, bindcraft_folder)->BasicDict:
     # set paths to model weights and executables
     if bindcraft_folder == "colab":
         advanced_settings["af_params_dir"] = '/content/bindcraft/params/'
@@ -255,7 +256,8 @@ def perform_advanced_settings_check(advanced_settings, bindcraft_folder):
     return advanced_settings
 
 # Load settings from JSONs
-def load_json_settings(settings_json, filters_json, advanced_json):
+def load_json_settings(settings_json, filters_json, advanced_json)->Tuple[
+    Dict[str,str|int|List[int]],BasicDict,Dict[str,Dict[str,float|bool|None]]]:
     # load settings from json files
     with open(settings_json, 'r') as file:
         target_settings = json.load(file)
@@ -269,7 +271,7 @@ def load_json_settings(settings_json, filters_json, advanced_json):
     return target_settings, advanced_settings, filters
 
 # AF2 model settings, make sure non-overlapping models with template option are being used for design and re-prediction
-def load_af2_models(af_multimer_setting):
+def load_af2_models(af_multimer_setting)->Tuple[List[int],List[int],bool]:
     if af_multimer_setting:
         design_models = [0,1,2,3,4]
         prediction_models = [0,1]
