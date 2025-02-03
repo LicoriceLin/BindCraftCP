@@ -1,3 +1,5 @@
 params/
 output/
+input/
 legacy/
+**/__pycache__/

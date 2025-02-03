@@ -71,7 +71,7 @@ def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
 def binder_hallucination(design_name:str, starting_pdb:str, chain:str, 
                     target_hotspot_residues:str, length:int, seed:int, helicity_value:float, 
                     design_models:List[int], advanced_settings:BasicDict, 
-                    design_paths:Dict[str,str], failure_csv:str,
+                    design_paths:Dict[str,str], failure_csv:str, #af_model:mk_mpnn_model=None,
                     ):
     # from pdb import set_trace; set_trace()
     model_pdb_path = os.path.join(design_paths["Trajectory"], design_name+".pdb")
@@ -87,10 +87,10 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
     # sanity check for hotspots
     if target_hotspot_residues == "":
         target_hotspot_residues = None
-
+    
     af_model.prep_inputs(pdb_filename=starting_pdb, chain=chain, binder_len=length, hotspot=target_hotspot_residues, seed=seed, rm_aa=advanced_settings["omit_AAs"],
                         rm_target_seq=advanced_settings["rm_template_seq_design"], rm_target_sc=advanced_settings["rm_template_sc_design"])
-    if advanced_settings.get('cyc_design',False):
+    if advanced_settings.get('cyclize_peptide',False):
         # To implement: multi-chain target, scaffolding.
         add_cyclic_offset(af_model, offset_type=2)
     ### Update weights based on specified settings
@@ -147,6 +147,107 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         t_mcmc = 0.01
         af_model._design_mcmc(advanced_settings["greedy_iterations"], half_life=half_life, T_init=t_mcmc, mutation_rate=greedy_tries, num_models=1, models=design_models,
                                 sample_models=advanced_settings["sample_models"], save_best=True)
+    elif advanced_settings["design_algorithm"] == 'mcmc_sampling':
+        '''
+        for quick bunch sampling.
+        At Stage 1, 50 steps of design_logits (e_soft=0., num_models=3) are conducted as annealing.
+        At Stage 2, step-by-steps of design_logits (e_soft=1) are conducted until:
+            1) maximum of `soft_iterations` is achieved. Or
+            2) or np.random.rand() > 2**((pLDDT-0.65)*10)-1 (0.75: forced exit)
+        At Stage 3, step-by-steps of design_soft (e_temp=1e-2) are conducted until:
+            1) maximum of `temp_iterations` achieved. Or
+            2) or np.random.rand() > 2**((pLDDT-0.75)*10)-1 (0.85: forced exit)
+            Then we are having af_model.aux["seq"]["logits"] as profile:
+                af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"] (or 'pssm'?)
+            af_model._inputs/self.aux are kept in af_model._tmp.
+        At Stage 4, design_semigreedy(tries=greedy_tries,seq_logits=af_model._tmp["seq_logits"][0] for x rounds until 'pssm_sampling_num'/'pssm_max_round' achieved.
+            for each round, if pLDDT > `day0_final_plddt` and no same seq hit before (kept in af_model._tmp['prev_hit']),
+                a full output would be generated / saved with model_pdb_path.replace('.pdb','b{i}.pdb')
+            Then self._inputs/self.aux would be resumed from af_model._tmp
+        '''
+        print("Stage 1: Annealing")
+        af_model.design_logits(iters=50, e_soft=0., models=design_models, num_models=2,  #3
+            sample_models=advanced_settings["sample_models"], save_best=True)
+        plddt = get_best_plddt(af_model, length)
+        print(f"Annealing Finished with init pLDDT {plddt:.2f}, Continue design_logits")
+        af_model.clear_best()
+        hit_count=0
+        while af_model._k<advanced_settings["soft_iterations"]:
+            af_model.design_logits(iters=1, e_soft=1, models=design_models, num_models=1, 
+                sample_models=advanced_settings["sample_models"], ramp_recycles=False, save_best=True)
+            plddt=np.mean(af_model.aux["plddt"][-length:])
+            if  plddt>0.65 and np.random.rand() < 2**((plddt-0.65)*10)-1:
+                hit_count+=1
+                if hit_count>=3:
+                    break
+        action_str= "Early Stopped" if af_model._k<advanced_settings["soft_iterations"] else "Terminated"
+        print(f"design_logits {action_str} at {af_model._k} step, with pLDDT {plddt:.2f}. Begin design_soft")
+
+        design_soft_step=0
+        hit_count=0
+        while design_soft_step<advanced_settings["temporary_iterations"]:
+            temp=1e-2+(1-1e-2)*(1-(design_soft_step+1)/advanced_settings["temporary_iterations"])**2
+            af_model.design_soft(1, temp=temp, models=design_models, num_models=1,
+                    sample_models=advanced_settings["sample_models"], ramp_recycles=False, save_best=True)
+            plddt=np.mean(af_model.aux["plddt"][-length:])
+            design_soft_step+=1
+            if  plddt>0.75 and np.random.rand() < 2**((plddt-0.75)*10)-1:
+                hit_count+=1
+                if hit_count>=3:
+                    break
+        # af_model.set_seq
+        action_str= "Early Stopped" if design_soft_step<advanced_settings["temporary_iterations"] else "Terminated"
+        print(f"design_soft {action_str} at {af_model._k} step, with pLDDT {plddt:.2f}. Begin `pssm-mcmc`")
+        print(f'seq: {af_model.get_seq()[0]}')
+        def load_settings():    
+            if "save_" in af_model._tmp:
+                [af_model.opt, af_model._args, af_model._params, af_model._inputs,af_model._tmp["best"]] = af_model._tmp["save_"]#af_model._tmp.pop("save_")
+        def save_settings():
+            # load_settings()
+            af_model._tmp["save_"] = [copy_dict(x) for x in [
+                af_model.opt, af_model._args, af_model._params, af_model._inputs,af_model._tmp["best"]]]
+        save_settings()
+        # return af_model
+        af_model._tmp["seq_logits"] = seq_logits = af_model.aux["seq"]["logits"][0] # or logits/soft?
+        design_greedy_step=0
+        mcmc_inner_iter=advanced_settings.get("mcmc_inner_iter",100)
+        af_model._tmp['outputs']=[]
+        half_life = round(mcmc_inner_iter, 0)
+        t_mcmc = 0.01
+        while design_greedy_step<advanced_settings["greedy_iterations"]:
+            af_model.clear_best()
+            af_model._design_mcmc(
+                steps=mcmc_inner_iter,seq_logits=seq_logits,
+                half_life=half_life, T_init=t_mcmc, mutation_rate=greedy_tries, 
+                num_models=1, models=design_models,sample_models=advanced_settings["sample_models"], 
+                save_best=True)
+            af_model._tmp['outputs'].append(af_model._tmp["best"])
+            # af_model._k-=mcmc_inner_iter
+            af_model.save_pdb(model_pdb_path.replace('.pdb',f'-b{design_greedy_step+1}.pdb'))
+            print(f"sample id {design_greedy_step+1} finished with pLDDT {get_best_plddt(af_model, length):.2f}")
+            print(f'seq: {af_model.get_seq()[0]}')
+            # final_plddt = get_best_plddt(af_model, length)
+            # todo: discard poor results and don't count them
+            load_settings()
+            # save_settings()
+            design_greedy_step+=1
+        print("tmp: choose the best sample to continue.")
+        losses = [x["aux"]["loss"] for x in af_model._tmp['outputs']]
+        best = af_model._tmp['outputs'][np.argmin(losses)]
+        af_model.aux, seq = best["aux"], jnp.array(best["aux"]["seq"]['input'])
+        af_model.set_seq(seq=seq, bias=af_model._inputs["bias"])
+        af_model._save_results(save_best=True, verbose=False)
+        return af_model
+
+        # print(f"Soft Design Early Stopped at {af_model._k} step, with pLDDT {plddt:.2f}, Anneal temp with decreasing steps")
+        # remain_iter=advanced_settings["temporary_iterations"]-design_soft_step
+        # b_temp=1e-2+(1-1e-2)*(1-(design_soft_step+1)/advanced_settings["temporary_iterations"])**2
+        # af_model.design_soft(
+        #     iters=remain_iter, tmp=b_temp,e_temp=1e-2, 
+        #     e_step=0.1,models=design_models, num_models=1,
+        #     sample_models=advanced_settings["sample_models"], 
+        #     ramp_recycles=False, save_best=True)
+
 
     elif advanced_settings["design_algorithm"] == '4stage':
         # initial logits to prescreen trajectory
@@ -212,7 +313,8 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
                         print("Stage 4: PSSM Semigreedy Optimisation")
                         af_model.clear_best()
                         af_model.design_pssm_semigreedy(soft_iters=0, hard_iters=advanced_settings["greedy_iterations"], tries=greedy_tries, models=design_models, 
-                                                        num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True)
+                                                        num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True,
+                                                        seq_logits=af_model.aux["seq"]["logits"][0])
 
                 else:
                     update_failures(failure_csv, 'Trajectory_one-hot_pLDDT')
@@ -249,7 +351,7 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         print("")
     else:
         # check if low quality prediction
-        if final_plddt < advanced_settings.get('day0_final_plddt',0):
+        if final_plddt < advanced_settings.get('day0_final_plddt',0.7):
             af_model.aux["log"]["terminate"] = "LowConfidence"
             update_failures(failure_csv, 'Trajectory_final_pLDDT')
             print("Trajectory starting confidence low, skipping analysis and MPNN optimisation")
@@ -298,7 +400,7 @@ def predict_binder_complex(
         target_pdb:str|None, chain:str|None, length:int|None, trajectory_pdb:str|None, prediction_models:list[int], 
         advanced_settings:BasicDict, filters:Dict[str,Dict[str,bool|None]], 
         design_paths:Dict[str,str], failure_csv:str, seed:int|None=None,
-        binder_chain:str = "B"
+        binder_chain:str = "B",re_prep:bool=False,
         )->Tuple[Dict[str,BasicDict],bool]|Tuple[Dict[str,BasicDict],bool,mk_afdesign_model]:
     '''
     In House Modification:
@@ -316,16 +418,18 @@ def predict_binder_complex(
             data_dir=advanced_settings["af_params_dir"],
             use_multimer=advanced_settings["use_multimer_design"])
         ret_m=True
+        re_prep=True
     else:
         ret_m=False
-    prediction_model.prep_inputs(
-            pdb_filename=target_pdb, 
-            chain=chain, 
-            binder_len=length, 
-            rm_target_seq=advanced_settings["rm_template_seq_predict"],
-            rm_target_sc=advanced_settings["rm_template_sc_predict"],
-            seed=seed)
-    if advanced_settings.get('cyc_design',False):
+    if re_prep:
+        prediction_model.prep_inputs(
+                pdb_filename=target_pdb, 
+                chain=chain, 
+                binder_len=length, 
+                rm_target_seq=advanced_settings["rm_template_seq_predict"],
+                rm_target_sc=advanced_settings["rm_template_sc_predict"],
+                seed=seed)
+    if advanced_settings.get('cyclize_peptide',False):
         # To implement: multi-chain target, scaffolding.
         add_cyclic_offset(prediction_model, offset_type=2)
     prediction_stats:Dict[str,BasicDict] = {}
@@ -345,7 +449,7 @@ def predict_binder_complex(
             # predict model
             prediction_model.predict(seq=binder_sequence, models=[model_num], 
                 num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
-            prediction_model.save_pdb(complex_pdb)
+            prediction_model.save_pdb(complex_pdb,get_best=False)
             prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
 
             # extract the statistics for the model
@@ -388,7 +492,7 @@ def predict_binder_complex(
     # AF2 filters passed, contuing with relaxation
     for model_num in prediction_models:
         complex_pdb = os.path.join(design_paths["MPNN"], f"{mpnn_design_name}_model{model_num+1}.pdb")
-        if pass_af2_filters:
+        if pass_af2_filters and model_num+1 in prediction_stats and os.path.exists(complex_pdb):
             mpnn_relaxed = os.path.join(design_paths["MPNN/Relaxed"], f"{mpnn_design_name}_model{model_num+1}.pdb")
             pr_relax(complex_pdb, mpnn_relaxed)
             num_clashes_mpnn = calculate_clash_score(complex_pdb)
@@ -443,7 +547,7 @@ def predict_binder_complex(
 def predict_binder_alone(
         prediction_model:mk_afdesign_model|None, binder_sequence:str, mpnn_design_name:str, 
         length:int|None, trajectory_pdb:str|None, binder_chain:str|None, prediction_models:List[int], 
-        advanced_settings:BasicDict, design_paths:str, seed:int|None=None
+        advanced_settings:BasicDict, design_paths:str, seed:int|None=None,re_prep:bool=False,
         )->Dict[str,BasicDict]|Tuple[Dict[str,BasicDict],mk_afdesign_model]:
     '''
     In House Modification:
@@ -458,10 +562,12 @@ def predict_binder_alone(
             data_dir=advanced_settings["af_params_dir"], use_multimer=advanced_settings["use_multimer_design"])
         
         ret_m=True
+        re_prep=True
     else:
         ret_m=False
-    prediction_model.prep_inputs(length=length,seed=seed)
-    if advanced_settings.get('cyc_design',False):
+    if re_prep:
+        prediction_model.prep_inputs(length=length,seed=seed)
+    if advanced_settings.get('cyclize_peptide',False):
         # To implement: multi-chain target, scaffolding.
         add_cyclic_offset(prediction_model, offset_type=2)
     binder_stats = {}
@@ -478,7 +584,7 @@ def predict_binder_alone(
             # predict model
             prediction_model.predict(models=[model_num], 
                     num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
-            prediction_model.save_pdb(binder_alone_pdb)
+            prediction_model.save_pdb(binder_alone_pdb,get_best=False)
             prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, pae
 
             
