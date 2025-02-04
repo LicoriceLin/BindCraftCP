@@ -494,7 +494,7 @@ def predict_binder_complex(
         complex_pdb = os.path.join(design_paths["MPNN"], f"{mpnn_design_name}_model{model_num+1}.pdb")
         if pass_af2_filters and model_num+1 in prediction_stats and os.path.exists(complex_pdb):
             mpnn_relaxed = os.path.join(design_paths["MPNN/Relaxed"], f"{mpnn_design_name}_model{model_num+1}.pdb")
-            pr_relax(complex_pdb, mpnn_relaxed)
+            pr_relax(complex_pdb, mpnn_relaxed,advanced_settings.get('cyclize_peptide',False))
             num_clashes_mpnn = calculate_clash_score(complex_pdb)
             num_clashes_mpnn_relaxed = calculate_clash_score(mpnn_relaxed)
             # analyze interface scores for relaxed af2 trajectory

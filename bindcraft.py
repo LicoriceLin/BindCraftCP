@@ -125,7 +125,7 @@ while True:
         if trajectory.aux["log"]["terminate"] == "":
             # Relax binder to calculate statistics
             trajectory_relaxed = os.path.join(design_paths["Trajectory/Relaxed"], design_name + ".pdb")
-            pr_relax(trajectory_pdb, trajectory_relaxed)
+            pr_relax(trajectory_pdb, trajectory_relaxed,advanced_settings.get('cyclize_peptide',False))
 
             # define binder chain, placeholder in case multi-chain parsing in ColabDesign gets changed
             binder_chain = "B"

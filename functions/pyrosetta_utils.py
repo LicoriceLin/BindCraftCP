@@ -15,6 +15,7 @@ from pyrosetta.rosetta.core.io import pose_from_pose
 from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
 from .generic_utils import clean_pdb
 from .biopython_utils import hotspot_residues
+from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 
 # Rosetta interface scores
 def score_interface(pdb_file, binder_chain="B"):
@@ -201,10 +202,22 @@ def unaligned_rmsd(reference_pdb, align_pdb, reference_chain_id, align_chain_id)
     return round(rmsd, 2)
 
 # Relax designed structure
-def pr_relax(pdb_file, relaxed_pdb_path):
+def pr_relax(pdb_file:str, relaxed_pdb_path:str,cyclize_peptide:bool=False):
     if not os.path.exists(relaxed_pdb_path):
         # Generate pose
         pose = pr.pose_from_pdb(pdb_file)
+        if cyclize_peptide:
+            b,e=len(pose.split_by_chain()[1])+1,len(pose)
+            mover=XmlObjects.static_get_mover(
+                f'''<PeptideCyclizeMover name="close" >
+                <Torsion res1="{e}" res2="{e}" res3="{b}" res4="{b}" atom1="CA" atom2="C" atom3="N" atom4="CA" cst_func="CIRCULARHARMONIC 3.141592654 0.005" />
+                <Angle res1="{e}" atom1="CA" res_center="{e}" atom_center="C" res2="{b}" atom2="N" cst_func="HARMONIC 2.01000000 0.01" />
+                <Angle res1="{e}" atom1="C" res_center="{b}" atom_center="N" res2="{b}" atom2="CA" cst_func="HARMONIC 2.14675498 0.01" />
+                <Distance res1="{e}" res2="{b}" atom1="C" atom2="N" cst_func="HARMONIC 1.32865 0.01" />
+                <Bond res1="{e}" res2="{b}" atom1="C" atom2="N" add_termini="true" />
+            </PeptideCyclizeMover>'''
+            )
+            mover.apply(pose)
         start_pose = pose.clone()
 
         ### Generate movemaps
