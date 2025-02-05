@@ -18,10 +18,11 @@ from .biopython_utils import hotspot_residues
 from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 
 # Rosetta interface scores
-def score_interface(pdb_file, binder_chain="B"):
+def score_interface(pdb_file, binder_chain="B",cyclize_peptide:bool=False):
     # load pose
     pose = pr.pose_from_pdb(pdb_file)
-
+    if cyclize_peptide:
+        pose.conformation().chains_from_termini()
     # analyze interface statistics
     iam = InterfaceAnalyzerMover()
     iam.set_interface("A_B")
@@ -100,6 +101,8 @@ def score_interface(pdb_file, binder_chain="B"):
         interface_binder_fraction = 0
 
     # calculate surface hydrophobicity
+    # if cyclize_peptide:
+    #     pose.conformation().chains_from_termini()
     binder_pose = {pose.pdb_info().chain(pose.conformation().chain_begin(i)): p for i, p in zip(range(1, pose.num_chains()+1), pose.split_by_chain())}[binder_chain]
 
     layer_sel = pr.rosetta.core.select.residue_selector.LayerSelector()

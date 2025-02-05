@@ -498,7 +498,7 @@ def predict_binder_complex(
             num_clashes_mpnn = calculate_clash_score(complex_pdb)
             num_clashes_mpnn_relaxed = calculate_clash_score(mpnn_relaxed)
             # analyze interface scores for relaxed af2 trajectory
-            mpnn_interface_scores, mpnn_interface_AA, mpnn_interface_residues = score_interface(mpnn_relaxed, binder_chain)
+            mpnn_interface_scores, mpnn_interface_AA, mpnn_interface_residues = score_interface(mpnn_relaxed, binder_chain,cyclize_peptide=advanced_settings.get('cyclize_peptide',False))
             # secondary structure content of starting trajectory binder
             (mpnn_alpha, mpnn_beta, mpnn_loops, mpnn_alpha_interface, 
              mpnn_beta_interface, mpnn_loops_interface, mpnn_i_plddt, mpnn_ss_plddt 
