@@ -535,7 +535,8 @@ def predict_binder_complex(
                 'Binder_BetaSheet%': mpnn_beta,
                 'Binder_Loop%': mpnn_loops,
                 'Hotspot_RMSD': rmsd_site,
-                'Target_RMSD': target_rmsd
+                'Target_RMSD': target_rmsd,
+                'mpnn_interface_residues':mpnn_interface_residues
             })
         else:
             if os.path.exists(complex_pdb):
