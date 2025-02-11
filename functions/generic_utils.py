@@ -356,7 +356,7 @@ def calculate_averages(statistics, handle_aa=False):
                         if aa not in aa_sums:
                             aa_sums[aa] = 0
                         aa_sums[aa] += count
-                elif stat == 'mpnn_interface_residues':
+                elif stat in ['mpnn_interface_residues','target_interface_residues']:
                     pass
                 else:
                     sums[stat] += value

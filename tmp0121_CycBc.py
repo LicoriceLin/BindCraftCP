@@ -273,7 +273,7 @@ def bindcraft_score(
                         'Binder_BetaSheet%', 'Binder_Loop%', 'InterfaceAAs', 'Hotspot_RMSD', 'Target_RMSD']
 
     # Initialize mpnn_data with the non-statistical data
-    mpnn_data = [design_name, 'Direct', len(binder_sequence), seed, 0., target_settings["target_hotspot_residues"], 
+    mpnn_data = [design_name, 'Direct', len(binder_sequence), seed, 0., complex_statistics[1].get('target_interface_residues',''), 
             binder_sequence, complex_statistics[1].get('mpnn_interface_residues',''), 'mpnn_score', 'place_holder_id']
     # WARNING! In original bindcraft, it seems that only the last mpnn_interface_residues are saved.
     # should propose this bug for further modification

@@ -135,7 +135,7 @@ three_to_one_map = {
 }
 
 # identify interacting residues at the binder interface
-def hotspot_residues(trajectory_pdb, binder_chain="B", atom_distance_cutoff=4.0):
+def hotspot_residues(trajectory_pdb, binder_chain="B", atom_distance_cutoff=4.0, target_chain='A'):
     # Parse the PDB file
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("complex", trajectory_pdb)
@@ -145,7 +145,7 @@ def hotspot_residues(trajectory_pdb, binder_chain="B", atom_distance_cutoff=4.0)
     binder_coords = np.array([atom.coord for atom in binder_atoms])
 
     # Get atoms and coords for the target chain
-    target_atoms = Selection.unfold_entities(structure[0]['A'], 'A')
+    target_atoms = Selection.unfold_entities(structure[0][target_chain], 'A')
     target_coords = np.array([atom.coord for atom in target_atoms])
 
     # Build KD trees for both chains

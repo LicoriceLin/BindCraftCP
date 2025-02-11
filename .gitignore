@@ -3,3 +3,4 @@ output/
 input/
 legacy/
 **/__pycache__/
+ana/
