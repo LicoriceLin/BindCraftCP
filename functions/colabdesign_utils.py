@@ -495,10 +495,13 @@ def predict_binder_complex(
         if pass_af2_filters and model_num+1 in prediction_stats and os.path.exists(complex_pdb):
             mpnn_relaxed = os.path.join(design_paths["MPNN/Relaxed"], f"{mpnn_design_name}_model{model_num+1}.pdb")
             pr_relax(complex_pdb, mpnn_relaxed,advanced_settings.get('cyclize_peptide',False))
+            
+            # integrated from BindCraft Main Workflow
             num_clashes_mpnn = calculate_clash_score(complex_pdb)
             num_clashes_mpnn_relaxed = calculate_clash_score(mpnn_relaxed)
             # analyze interface scores for relaxed af2 trajectory
             mpnn_interface_scores, mpnn_interface_AA, mpnn_interface_residues = score_interface(mpnn_relaxed, binder_chain,cyclize_peptide=advanced_settings.get('cyclize_peptide',False))
+            target_interface_residues = ','.join([f'A{i}' for i in hotspot_residues(mpnn_relaxed,'A',target_chain='B').keys()])
             # secondary structure content of starting trajectory binder
             (mpnn_alpha, mpnn_beta, mpnn_loops, mpnn_alpha_interface, 
              mpnn_beta_interface, mpnn_loops_interface, mpnn_i_plddt, mpnn_ss_plddt 
@@ -536,7 +539,8 @@ def predict_binder_complex(
                 'Binder_Loop%': mpnn_loops,
                 'Hotspot_RMSD': rmsd_site,
                 'Target_RMSD': target_rmsd,
-                'mpnn_interface_residues':mpnn_interface_residues
+                'mpnn_interface_residues':mpnn_interface_residues,
+                "target_interface_residues":target_interface_residues
             })
         else:
             if os.path.exists(complex_pdb):
@@ -595,6 +599,8 @@ def predict_binder_alone(
                 'pTM': round(prediction_metrics['ptm'], 2), 
                 'pAE': round(prediction_metrics['pae'], 2),
             }
+            
+            # integrated from BindCraft Main Workflow
             # align binder model to trajectory binder
             if trajectory_pdb is not None and binder_chain is not None:
                 align_pdbs(trajectory_pdb, binder_alone_pdb, binder_chain, "A")
