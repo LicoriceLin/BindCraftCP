@@ -5,7 +5,7 @@
 import os, re, shutil, math, pickle
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List,Dict,Tuple
+from typing import List,Dict,Tuple,Optional
 import jax
 import jax.numpy as jnp
 from scipy.special import softmax
@@ -71,25 +71,28 @@ def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
 def binder_hallucination(design_name:str, starting_pdb:str, chain:str, 
                     target_hotspot_residues:str, length:int, seed:int, helicity_value:float, 
                     design_models:List[int], advanced_settings:BasicDict, 
-                    design_paths:Dict[str,str], failure_csv:str, #af_model:mk_mpnn_model=None,
+                    design_paths:Dict[str,str], failure_csv:str, af_model:Optional[mk_afdesign_model]=None,
                     ):
     # from pdb import set_trace; set_trace()
     model_pdb_path = os.path.join(design_paths["Trajectory"], design_name+".pdb")
+    if af_model is None:
+        # clear GPU memory for new trajectory
+        clear_mem()
 
-    # clear GPU memory for new trajectory
-    clear_mem()
+        # initialise binder hallucination model
+        af_model = mk_afdesign_model(protocol="binder", debug=False, data_dir=advanced_settings["af_params_dir"], 
+                                    use_multimer=advanced_settings["use_multimer_design"], num_recycles=advanced_settings["num_recycles_design"],
+                                    best_metric='loss')
 
-    # initialise binder hallucination model
-    af_model = mk_afdesign_model(protocol="binder", debug=False, data_dir=advanced_settings["af_params_dir"], 
-                                use_multimer=advanced_settings["use_multimer_design"], num_recycles=advanced_settings["num_recycles_design"],
-                                best_metric='loss')
+        # sanity check for hotspots
+        if target_hotspot_residues == "":
+            target_hotspot_residues = None
+        
+        af_model.prep_inputs(pdb_filename=starting_pdb, chain=chain, binder_len=length, hotspot=target_hotspot_residues, seed=seed, rm_aa=advanced_settings["omit_AAs"],
+                            rm_target_seq=advanced_settings["rm_template_seq_design"], rm_target_sc=advanced_settings["rm_template_sc_design"])
+    else:
+        af_model.restart(seed=seed)
 
-    # sanity check for hotspots
-    if target_hotspot_residues == "":
-        target_hotspot_residues = None
-    
-    af_model.prep_inputs(pdb_filename=starting_pdb, chain=chain, binder_len=length, hotspot=target_hotspot_residues, seed=seed, rm_aa=advanced_settings["omit_AAs"],
-                        rm_target_seq=advanced_settings["rm_template_seq_design"], rm_target_sc=advanced_settings["rm_template_sc_design"])
     if advanced_settings.get('cyclize_peptide',False):
         # To implement: multi-chain target, scaffolding.
         add_cyclic_offset(af_model, offset_type=2)
@@ -166,19 +169,21 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
             Then self._inputs/self.aux would be resumed from af_model._tmp
         '''
         print("Stage 1: Annealing")
-        af_model.design_logits(iters=50, e_soft=0., models=design_models, num_models=2,  #3
+        af_model.design_logits(iters=50, e_soft=0., models=design_models, num_models=advanced_settings.get('annealing_num_models',1),  #3
             sample_models=advanced_settings["sample_models"], save_best=True)
         plddt = get_best_plddt(af_model, length)
         print(f"Annealing Finished with init pLDDT {plddt:.2f}, Continue design_logits")
         af_model.clear_best()
         hit_count=0
+        moveon_hitcount=advanced_settings.get('moveon_hitcount',3)
         while af_model._k<advanced_settings["soft_iterations"]:
-            af_model.design_logits(iters=1, e_soft=1, models=design_models, num_models=1, 
+            soft=(af_model._k-49)/(advanced_settings["soft_iterations"]-49)
+            af_model.design_logits(iters=1, soft=soft, models=design_models, num_models=1, 
                 sample_models=advanced_settings["sample_models"], ramp_recycles=False, save_best=True)
             plddt=np.mean(af_model.aux["plddt"][-length:])
             if  plddt>0.65 and np.random.rand() < 2**((plddt-0.65)*10)-1:
                 hit_count+=1
-                if hit_count>=3:
+                if hit_count>=moveon_hitcount:
                     break
         action_str= "Early Stopped" if af_model._k<advanced_settings["soft_iterations"] else "Terminated"
         print(f"design_logits {action_str} at {af_model._k} step, with pLDDT {plddt:.2f}. Begin design_soft")
@@ -187,13 +192,13 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         hit_count=0
         while design_soft_step<advanced_settings["temporary_iterations"]:
             temp=1e-2+(1-1e-2)*(1-(design_soft_step+1)/advanced_settings["temporary_iterations"])**2
-            af_model.design_soft(1, temp=temp, models=design_models, num_models=1,
+            af_model.design(1, soft=soft,temp=temp, models=design_models, num_models=1,
                     sample_models=advanced_settings["sample_models"], ramp_recycles=False, save_best=True)
             plddt=np.mean(af_model.aux["plddt"][-length:])
             design_soft_step+=1
             if  plddt>0.75 and np.random.rand() < 2**((plddt-0.75)*10)-1:
                 hit_count+=1
-                if hit_count>=3:
+                if hit_count>=moveon_hitcount:
                     break
         # af_model.set_seq
         action_str= "Early Stopped" if design_soft_step<advanced_settings["temporary_iterations"] else "Terminated"
@@ -237,7 +242,7 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         af_model.aux, seq = best["aux"], jnp.array(best["aux"]["seq"]['input'])
         af_model.set_seq(seq=seq, bias=af_model._inputs["bias"])
         af_model._save_results(save_best=True, verbose=False)
-        return af_model
+        # return af_model
 
         # print(f"Soft Design Early Stopped at {af_model._k} step, with pLDDT {plddt:.2f}, Anneal temp with decreasing steps")
         # remain_iter=advanced_settings["temporary_iterations"]-design_soft_step
@@ -314,7 +319,7 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
                         af_model.clear_best()
                         af_model.design_pssm_semigreedy(soft_iters=0, hard_iters=advanced_settings["greedy_iterations"], tries=greedy_tries, models=design_models, 
                                                         num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True,
-                                                        seq_logits=af_model.aux["seq"]["logits"][0])
+                                                        seq_logits=af_model.aux["seq"]["pssm"][0])
 
                 else:
                     update_failures(failure_csv, 'Trajectory_one-hot_pLDDT')

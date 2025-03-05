@@ -99,7 +99,11 @@ def bindcraft_hallucinate(
     design_paths:Dict[str,str]|None=None,
     helicity_value:float=0.,
     seed:int|None=None,
-    binder_chain:str = "B"
+    binder_chain:str = "B",
+    af_model:Optional[mk_afdesign_model]=None,
+    settings_file='settings_file', 
+    filters_file='filters_file', 
+    advanced_file='advanced_file'
     ):
     '''
     to be curated.
@@ -127,47 +131,48 @@ def bindcraft_hallucinate(
         design_paths=design_paths, 
         failure_csv=failure_csv,
         seed=seed, 
+        af_model=af_model
         )
     trajectory_time = time.time() - trajectory_start_time
-    return trajectory
-    # trajectory_metrics:dict = copy_dict(trajectory.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
-    # trajectory_metrics = {k: round(v, 2) if isinstance(v, float) else v for k, v in trajectory_metrics.items()}
-    # trajectory_pdb = os.path.join(design_paths["Trajectory"], design_name + ".pdb")
-    # trajectory_relaxed = os.path.join(design_paths["Trajectory/Relaxed"], design_name + ".pdb")
-    # # time trajectory
-    # trajectory_time_text = f"{'%d hours, %d minutes, %d seconds' % (int(trajectory_time // 3600), int((trajectory_time % 3600) // 60), int(trajectory_time % 60))}"
-    # pr_relax(trajectory_pdb, trajectory_relaxed)
-    # # Calculate clashes before and after relaxation
-    # num_clashes_trajectory = calculate_clash_score(trajectory_pdb)
-    # num_clashes_relaxed = calculate_clash_score(trajectory_relaxed)
+    # return trajectory
+    trajectory_metrics:dict = copy_dict(trajectory.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
+    trajectory_metrics = {k: round(v, 2) if isinstance(v, float) else v for k, v in trajectory_metrics.items()}
+    trajectory_pdb = os.path.join(design_paths["Trajectory"], design_name + ".pdb")
+    trajectory_relaxed = os.path.join(design_paths["Trajectory/Relaxed"], design_name + ".pdb")
+    # time trajectory
+    trajectory_time_text = f"{'%d hours, %d minutes, %d seconds' % (int(trajectory_time // 3600), int((trajectory_time % 3600) // 60), int(trajectory_time % 60))}"
+    pr_relax(trajectory_pdb, trajectory_relaxed,cyclize_peptide=advanced_settings.get('cyclize_peptide',False))
+    # Calculate clashes before and after relaxation
+    num_clashes_trajectory = calculate_clash_score(trajectory_pdb)
+    num_clashes_relaxed = calculate_clash_score(trajectory_relaxed)
 
-    # # secondary structure content of starting trajectory binder and interface
-    # trajectory_alpha, trajectory_beta, trajectory_loops, trajectory_alpha_interface, trajectory_beta_interface, trajectory_loops_interface, trajectory_i_plddt, trajectory_ss_plddt = calc_ss_percentage(trajectory_pdb, advanced_settings, binder_chain)
+    # secondary structure content of starting trajectory binder and interface
+    trajectory_alpha, trajectory_beta, trajectory_loops, trajectory_alpha_interface, trajectory_beta_interface, trajectory_loops_interface, trajectory_i_plddt, trajectory_ss_plddt = calc_ss_percentage(trajectory_pdb, advanced_settings, binder_chain)
 
-    # # analyze interface scores for relaxed af2 trajectory
-    # trajectory_interface_scores, trajectory_interface_AA, trajectory_interface_residues = score_interface(trajectory_relaxed, binder_chain)
+    # analyze interface scores for relaxed af2 trajectory
+    trajectory_interface_scores, trajectory_interface_AA, trajectory_interface_residues = score_interface(trajectory_relaxed, binder_chain,cyclize_peptide=advanced_settings.get('cyclize_peptide',False))
 
-    # # starting binder sequence
-    # trajectory_sequence = trajectory.get_seq(get_best=True)[0]
+    # starting binder sequence
+    trajectory_sequence = trajectory.get_seq(get_best=True)[0]
 
-    # # analyze sequence
-    # traj_seq_notes = validate_design_sequence(trajectory_sequence, num_clashes_relaxed, advanced_settings)
+    # analyze sequence
+    traj_seq_notes = validate_design_sequence(trajectory_sequence, num_clashes_relaxed, advanced_settings)
 
-    # # target structure RMSD compared to input PDB
-    # trajectory_target_rmsd = unaligned_rmsd(target_settings["starting_pdb"], trajectory_pdb, target_settings["chains"], 'A')
+    # target structure RMSD compared to input PDB
+    trajectory_target_rmsd = unaligned_rmsd(target_settings["starting_pdb"], trajectory_pdb, target_settings["chains"], 'A')
 
-    # # save trajectory statistics into CSV
-    # trajectory_data = [design_name, advanced_settings["design_algorithm"], length, seed, helicity_value, target_settings["target_hotspot_residues"], trajectory_sequence, trajectory_interface_residues,
-    #                     trajectory_metrics['plddt'], trajectory_metrics['ptm'], trajectory_metrics['i_ptm'], trajectory_metrics['pae'], trajectory_metrics['i_pae'],
-    #                     trajectory_i_plddt, trajectory_ss_plddt, num_clashes_trajectory, num_clashes_relaxed, trajectory_interface_scores['binder_score'],
-    #                     trajectory_interface_scores['surface_hydrophobicity'], trajectory_interface_scores['interface_sc'], trajectory_interface_scores['interface_packstat'],
-    #                     trajectory_interface_scores['interface_dG'], trajectory_interface_scores['interface_dSASA'], trajectory_interface_scores['interface_dG_SASA_ratio'],
-    #                     trajectory_interface_scores['interface_fraction'], trajectory_interface_scores['interface_hydrophobicity'], trajectory_interface_scores['interface_nres'], trajectory_interface_scores['interface_interface_hbonds'],
-    #                     trajectory_interface_scores['interface_hbond_percentage'], trajectory_interface_scores['interface_delta_unsat_hbonds'], trajectory_interface_scores['interface_delta_unsat_hbonds_percentage'],
-    #                     trajectory_alpha_interface, trajectory_beta_interface, trajectory_loops_interface, trajectory_alpha, trajectory_beta, trajectory_loops, trajectory_interface_AA, trajectory_target_rmsd,
-    #                     trajectory_time_text, traj_seq_notes, settings_file, filters_file, advanced_file]
-    # insert_data(trajectory_csv, trajectory_data)
-    # return trajectory_data,trajectory
+    # save trajectory statistics into CSV
+    trajectory_data = [design_name, advanced_settings["design_algorithm"], length, seed, helicity_value, target_settings["target_hotspot_residues"], trajectory_sequence, trajectory_interface_residues,
+                        trajectory_metrics['plddt'], trajectory_metrics['ptm'], trajectory_metrics['i_ptm'], trajectory_metrics['pae'], trajectory_metrics['i_pae'],
+                        trajectory_i_plddt, trajectory_ss_plddt, num_clashes_trajectory, num_clashes_relaxed, trajectory_interface_scores['binder_score'],
+                        trajectory_interface_scores['surface_hydrophobicity'], trajectory_interface_scores['interface_sc'], trajectory_interface_scores['interface_packstat'],
+                        trajectory_interface_scores['interface_dG'], trajectory_interface_scores['interface_dSASA'], trajectory_interface_scores['interface_dG_SASA_ratio'],
+                        trajectory_interface_scores['interface_fraction'], trajectory_interface_scores['interface_hydrophobicity'], trajectory_interface_scores['interface_nres'], trajectory_interface_scores['interface_interface_hbonds'],
+                        trajectory_interface_scores['interface_hbond_percentage'], trajectory_interface_scores['interface_delta_unsat_hbonds'], trajectory_interface_scores['interface_delta_unsat_hbonds_percentage'],
+                        trajectory_alpha_interface, trajectory_beta_interface, trajectory_loops_interface, trajectory_alpha, trajectory_beta, trajectory_loops, trajectory_interface_AA, trajectory_target_rmsd,
+                        trajectory_time_text, traj_seq_notes, settings_file, filters_file, advanced_file]
+    insert_data(trajectory_csv, trajectory_data)
+    return trajectory_data,trajectory
 
 def bindcraft_score(
     binder_sequence:str,
