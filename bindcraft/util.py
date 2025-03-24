@@ -131,7 +131,7 @@ def _load_default_filters(bindcraft_benchmark:bool=False):
         filter['Binder_Loop%']={'threshold': 35, 'higher': False}
     return filter
     # filter['n_InterfaceUnsatHbonds']={'threshold': 40, 'higher': False}
-
+filters_type=Dict[str,Dict[str,float|int|bool]]
 _bc_benchmark_filters=_load_default_filters(True)
 _RFD_benchmark_filters={
     'r:plddt':{'threshold': 0.80, 'higher': True},

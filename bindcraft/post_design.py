@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from ._import import *
 from .util import (id2pdbfile,outdir_from_metrics,
     read_bc_metrics,read_design_metrics,_meta_cols,_aa_col,
-    _simpliest_filter,show_filter,check_filters
+    _simpliest_filter,show_filter,check_filters,filters_type
     )
 
 from numpy.lib.stride_tricks import sliding_window_view
@@ -316,7 +316,7 @@ class Metrics:
             ret.__dict__.update(d)
             return ret
     
-    def filter(self,filters:Dict[str,Dict[str,float|int|bool]]=_simpliest_filter):
+    def filter(self,filters:filters_type=_simpliest_filter):
         self.filters=filters
         check_filters(self.metrics,filters)
 
@@ -403,10 +403,11 @@ class Metrics:
             use_multimer=False, 
             use_initial_guess=True, 
             use_initial_atom_pos=True),
-        rescore_dir:str|None=None):
+        reload_rescore_dir:str|None=None,
+        reload_mpnn:bool=False):
         self._rescorer=ReScorer(self,cyclic=cyclic,model_kwargs=model_kwargs)
-        if rescore_dir is not None:
-            self._rescorer.reload_rescore_log(rescore_dir=rescore_dir)
+        if reload_rescore_dir is not None:
+            self._rescorer.reload_rescore_log(rescore_dir=reload_rescore_dir,mpnn=reload_mpnn)
         return self._rescorer
     
     def init_visualize(self,
@@ -636,14 +637,21 @@ class ReScorer:
         self.Metrics.metrics=pd.merge(left=self.Metrics.metrics,right=m_df,left_index=True,right_index=True)
         return self.Metrics.metrics[m_df.columns]
 
-    def reload_rescore_log(self,rescore_dir:str='rescore'):
+    def reload_rescore_log(self,rescore_dir:str='rescore',mpnn:bool=False):
         r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+rescore_dir
-        self.r_dir=r_dir
-                
         with open(r_dir+'/log.pkl','rb') as f:
-            self.rescore_log=pkl.load(f)
-        self.rescore_df=pd.DataFrame(self.rescore_log).T
-        return self.rescore_log
+            rescore_log=pkl.load(f)
+        rescore_df=pd.DataFrame(self.rescore_log).T
+
+        if mpnn:
+            self.m_dir=r_dir
+            self.mpnn_rescore_log=rescore_log
+            self.mpnn_rescore_df=rescore_df
+        else:
+            self.r_dir=r_dir
+            self.rescore_log=rescore_log
+            self.rescore_df=rescore_df
+        return rescore_df
     
     @property
     def complex_prediction_model(self):
