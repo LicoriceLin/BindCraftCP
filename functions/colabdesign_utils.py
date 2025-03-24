@@ -382,7 +382,10 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
 
     # move low quality prediction:
     if af_model.aux["log"]["terminate"] != "":
-        shutil.move(model_pdb_path, design_paths[f"Trajectory/{af_model.aux['log']['terminate']}"])
+        _=design_paths[f"Trajectory/{af_model.aux['log']['terminate']}"]+f'/{design_name}.pdb'
+        if os.path.exists(_):
+            os.remove(_)
+        shutil.move(model_pdb_path, _)
 
     ### get the sampled sequence for plotting
     af_model.get_seqs()
