@@ -49,7 +49,7 @@ class Design:
                 if _.exists():
                     self.load_previous_target_settings=_
                 else:
-                    self.load_previous_target_settings=_
+                    self.load_previous_target_settings=''
         else:
             self.load_previous_target_settings=''
         self._p=_p
