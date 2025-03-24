@@ -4,3 +4,4 @@ input/
 legacy/
 **/__pycache__/
 ana/
+tmp*

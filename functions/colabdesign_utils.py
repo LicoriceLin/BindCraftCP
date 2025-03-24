@@ -219,6 +219,7 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         af_model._tmp['outputs']=[]
         half_life = round(mcmc_inner_iter, 0)
         t_mcmc = 0.01
+        save_branch=advanced_settings.get('save_branch',False)
         while design_greedy_step<advanced_settings["greedy_iterations"]:
             af_model.clear_best()
             af_model._design_mcmc(
@@ -228,7 +229,8 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
                 save_best=True)
             af_model._tmp['outputs'].append(af_model._tmp["best"])
             # af_model._k-=mcmc_inner_iter
-            af_model.save_pdb(model_pdb_path.replace('.pdb',f'-b{design_greedy_step+1}.pdb'))
+            if save_branch:
+                af_model.save_pdb(model_pdb_path.replace('.pdb',f'-b{design_greedy_step+1}.pdb'))
             print(f"sample id {design_greedy_step+1} finished with pLDDT {get_best_plddt(af_model, length):.2f}")
             print(f'seq: {af_model.get_seq()[0]}')
             # final_plddt = get_best_plddt(af_model, length)
@@ -339,7 +341,8 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
         return
 
     ### save trajectory PDB
-    final_plddt = get_best_plddt(af_model, length)
+    # final_plddt = get_best_plddt(af_model, length)
+    final_plddt=np.mean(af_model.aux["plddt"][-length:])
     af_model.save_pdb(model_pdb_path)
     af_model.aux["log"]["terminate"] = ""
 
@@ -421,7 +424,7 @@ def predict_binder_complex(
             protocol="binder", 
             num_recycles=advanced_settings["num_recycles_validation"],
             data_dir=advanced_settings["af_params_dir"],
-            use_multimer=advanced_settings["use_multimer_design"])
+            use_multimer= (not advanced_settings["use_multimer_design"]))
         ret_m=True
         re_prep=True
     else:
@@ -450,45 +453,45 @@ def predict_binder_complex(
     for model_num in prediction_models:
         # check to make sure prediction does not exist already
         complex_pdb = os.path.join(design_paths["MPNN"], f"{mpnn_design_name}_model{model_num+1}.pdb")
-        if not os.path.exists(complex_pdb):
-            # predict model
-            prediction_model.predict(seq=binder_sequence, models=[model_num], 
-                num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
-            prediction_model.save_pdb(complex_pdb,get_best=False)
-            prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
+        # if not os.path.exists(complex_pdb):
+        # predict model
+        prediction_model.predict(seq=binder_sequence, models=[model_num], 
+            num_recycles=advanced_settings["num_recycles_validation"], verbose=False,seed=seed)
+        prediction_model.save_pdb(complex_pdb,get_best=False)
+        prediction_metrics = copy_dict(prediction_model.aux["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
 
-            # extract the statistics for the model
-            stats = {
-                'pLDDT': round(prediction_metrics['plddt'], 2), 
-                'pTM': round(prediction_metrics['ptm'], 2), 
-                'i_pTM': round(prediction_metrics['i_ptm'], 2), 
-                'pAE': round(prediction_metrics['pae'], 2), 
-                'i_pAE': round(prediction_metrics['i_pae'], 2)
-            }
-            prediction_stats[model_num+1] = stats
+        # extract the statistics for the model
+        stats = {
+            'pLDDT': round(prediction_metrics['plddt'], 2), 
+            'pTM': round(prediction_metrics['ptm'], 2), 
+            'i_pTM': round(prediction_metrics['i_ptm'], 2), 
+            'pAE': round(prediction_metrics['pae'], 2), 
+            'i_pAE': round(prediction_metrics['i_pae'], 2)
+        }
+        prediction_stats[model_num+1] = stats
 
-            # List of filter conditions and corresponding keys
-            filter_conditions = [
-                (f"{model_num+1}_pLDDT", 'plddt', '>='),
-                (f"{model_num+1}_pTM", 'ptm', '>='),
-                (f"{model_num+1}_i_pTM", 'i_ptm', '>='),
-                (f"{model_num+1}_pAE", 'pae', '<='),
-                (f"{model_num+1}_i_pAE", 'i_pae', '<='),
-            ]
+        # List of filter conditions and corresponding keys
+        filter_conditions = [
+            (f"{model_num+1}_pLDDT", 'plddt', '>='),
+            (f"{model_num+1}_pTM", 'ptm', '>='),
+            (f"{model_num+1}_i_pTM", 'i_ptm', '>='),
+            (f"{model_num+1}_pAE", 'pae', '<='),
+            (f"{model_num+1}_i_pAE", 'i_pae', '<='),
+        ]
 
-            # perform initial AF2 values filtering to determine whether to skip relaxation and interface scoring
-            for filter_name, metric_key, comparison in filter_conditions:
-                threshold = filters.get(filter_name, {}).get("threshold")
-                if threshold is not None:
-                    if comparison == '>=' and prediction_metrics[metric_key] < threshold:
-                        pass_af2_filters = False
-                        filter_failures[filter_name] = filter_failures.get(filter_name, 0) + 1
-                    elif comparison == '<=' and prediction_metrics[metric_key] > threshold:
-                        pass_af2_filters = False
-                        filter_failures[filter_name] = filter_failures.get(filter_name, 0) + 1
+        # perform initial AF2 values filtering to determine whether to skip relaxation and interface scoring
+        for filter_name, metric_key, comparison in filter_conditions:
+            threshold = filters.get(filter_name, {}).get("threshold")
+            if threshold is not None:
+                if comparison == '>=' and prediction_metrics[metric_key] < threshold:
+                    pass_af2_filters = False
+                    filter_failures[filter_name] = filter_failures.get(filter_name, 0) + 1
+                elif comparison == '<=' and prediction_metrics[metric_key] > threshold:
+                    pass_af2_filters = False
+                    filter_failures[filter_name] = filter_failures.get(filter_name, 0) + 1
 
-            if not pass_af2_filters:
-                break
+        if not pass_af2_filters:
+            break
 
     # Update the CSV file with the failure counts
     if filter_failures:

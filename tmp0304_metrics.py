@@ -1,12 +1,16 @@
 # %% Dependencies
 import glob
 import os
-from pathlib import Path
+# from pathlib import Path
+from pathlib import PosixPath as Path
 from tqdm import tqdm
 from subprocess import run
 from itertools import product, combinations
 from typing import Iterable,Union,Callable,Generator,List,Dict,Tuple
 from tempfile import TemporaryDirectory
+import pickle as pkl
+import json
+from ast import literal_eval
 
 import pandas as pd
 from pandas.api.types import CategoricalDtype
@@ -163,7 +167,7 @@ def plot_feat_MPOP1(df:pd.DataFrame,outpdf:str,cols:List[str]|None=None):
 
 def plot_ptm_tracks_MPOP1(ptm_tracks:dict,propka_metrics:pd.DataFrame):
     '''
-    ptm_tracks: from `gen_ptm_tracks`
+    ptm_tracks: from `gen_ptm_tracks_MPOP1`
     '''
     feature_names=['ppi', 'sasa', 'MeR','MeK', 'AcK','SuK', 'PiX', 'HoX', 'UbK','Gly'] #'PrQ',
     colors=['navy','tab:blue']+['cyan','teal']+['limegreen']+['crimson','coral']+['rosybrown','slategray','darkseagreen']
@@ -184,6 +188,7 @@ def plot_ptm_tracks_MPOP1(ptm_tracks:dict,propka_metrics:pd.DataFrame):
             fig.suptitle(o['tag']+'-'+f"{propka_metrics.loc[n]['pi-fold']:.1f}"+'\n'+propka_metrics.loc[n]['binder'])
             pdf.savefig(fig)
             plt.close(fig)
+            
 # %% MPOP1 sys funcs:
 def peel_pdbfile(pdbfile:str):
     '''
@@ -200,7 +205,7 @@ def peel_pdbfile(pdbfile:str):
     
 id2pdbfile=lambda x:glob.glob(f'output/MPOP1-benchmark*/Accepted/{x.replace("-Skp1","")}*.pdb')[0]
 
-def read_bc_metrics()->pd.DataFrame:
+def read_bc_metrics_MPOP1()->pd.DataFrame:
     dfs=[]
     for i in glob.glob('output/MPOP1-benchmark*/final_design_stats.csv'):
         df=pd.read_csv(i)
@@ -295,15 +300,19 @@ def write_out(strcture:Entity,file:str='tmp.pdb',write_end:bool=True, preserve_a
 # %% MuteSiteDeep Util
 def run_musite(fasta:str,outdir:str,
     repo_dir='/hpf/projects/mkoziarski/zdeng/MusiteDeep_web/',
-    python='/hpf/projects/mkoziarski/zdeng/miniconda3/envs/musite/bin/python'):
+    ):
+    python='/hpf/projects/mkoziarski/zdeng/miniconda3/envs/musite/bin/python'
+    outdir_=str(Path(outdir).absolute())
     for i in glob.glob(f'{repo_dir}/MusiteDeep/models/*'):
         model=Path(i).stem
         run([python,
             'predict_multi_batch.py',
             '-input',Path(fasta).absolute(),
-            '-output',f'{outdir}/{model}',
+            '-output',f'{outdir_}/{model}',
             '-model-prefix',f'models/{model}',],
             cwd=f'{repo_dir}/MusiteDeep')
+    with open(f'{outdir}/MUSITE_DONE', 'w') as f:
+        f.write('Musite Done\n')
         
 single_mutsite_parse=Dict[str,List[Tuple[int,str,float]]]
 def parse_musite_single(ptm_file:str)->single_mutsite_parse:
@@ -327,7 +336,6 @@ def parse_musite_single(ptm_file:str)->single_mutsite_parse:
             vs.append((int(l_[0]),l_[1],float(l_[2].split(':')[-1])))
     return o
 
-
 musite_parse_recipe={
     'Methyllysine':('MeK','HIS'),
     'N6-acetyllysine':('AcK','GLN'),
@@ -346,9 +354,12 @@ musite_parse_recipe={
 
 def parse_musite_dir(
     mutsite_dir:str,
-    recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe,
     )->Dict[str,Tuple[single_mutsite_parse,str]]:
-    
+    '''
+    only use recipe's name `k` / short name `v[0]`
+    should be safe & rigid.
+    '''
+    recipe=musite_parse_recipe
     ptms={}
     for k,v in recipe.items():
         ptm_file=Path(mutsite_dir)/f'{k}_results.txt'
@@ -357,7 +368,7 @@ def parse_musite_dir(
         
     return ptms
 
-def gen_ptm_tracks(
+def gen_ptm_tracks_MPOP1(
     bc_metrics:pd.DataFrame,ptms:Dict[str,Tuple[single_mutsite_parse,str]],
     sasa_threshold:float=0.4,
     ):
@@ -394,6 +405,74 @@ def gen_ptm_tracks(
 
     return output
     
+def gen_ana_tracks(
+    bc_metrics:pd.DataFrame,
+    ptms:Dict[str,Tuple[single_mutsite_parse,str]]|None=None,
+    sasa_threshold:float=0.4,
+    )->Dict[str,Dict[str,str|np.ndarray]]:
+    '''
+    bc_metrics: from `read_bc_metrics`. future: keep the format, make it generalizable.
+    ptms: from `parse_musite_dir`
+    '''
+    output={}
+    for i,s in tqdm(bc_metrics.iterrows()):
+        o={}
+        if 'Design' in s:
+            o['name']=s['Design']
+        else:
+            o['name']=i
+        o['seq']=s['Sequence']
+        # o['tag']=f"{s['tag']}-{s['assay_target']}"
+
+        o['sasa']=cal_sasa(s['pdbfile'])
+
+        o['ppi']=np.zeros(len(o['seq']),dtype=int)
+        if s['InterfaceResidues']!='':
+           o['ppi'][[int(i[1:])-1 for i in s['InterfaceResidues'].split(',')]]=1
+        o['ppi'] = o['ppi'] & (o['sasa']>sasa_threshold)
+        o['surf']=(o['sasa']>sasa_threshold) & (~o['ppi'])
+        o['core']=(o['sasa']<=sasa_threshold).astype(int)
+        if ptms is not None:
+            for k,v in ptms.items():
+                o[k]=np.zeros(len(o['seq']),dtype=float)
+                ptm=v[0].get(o['name'],[])
+                for i in ptm:
+                    o[k][i[0]-1]=i[2]
+
+            o['PiX']=o['PiST']+o['PiY']
+            o['Gly']=o['GlyO']+o['GlyN']
+            o['HoX']=o['HoP']+o['HoK']
+
+        output[o['name']]=o
+
+    return output
+
+def keep_max_ptm(ptm_track:Dict[str,str|np.ndarray],
+    used_ptms:List[str]=['MeK', 'AcK', 'MeR', 'PiST', 'PiY', 'UbK', 'SuK','GlyO', 'GlyN','HoP', 'HoK']): #'PrQ', 'HoP', 'HoK' are weird
+    arrays= [ptm_track[i] for i in used_ptms]
+    A = np.stack(arrays)
+    max_values = np.max(A, axis=0) 
+    mask = A == max_values
+    A_filtered = A * mask
+    ptm_track.update(
+        {k:A_filtered[i] for i,k in enumerate(used_ptms)})
+    return ptm_track
+
+def cal_ptm_feat(ptm_track:Dict[str,str|np.ndarray],
+        used_ptms=['MeK', 'AcK', 'MeR','PiX','UbK', 'SuK', 'Gly','HoX' ],#'HoP', 'HoK' #,'PrQ'
+        used_loc=['ppi','surf','all_surf'], #'core'
+        max_only:bool=False,
+        threshold=0.5):
+    # ptm_track=ptm_tracks['5v4b_chainA_1000x2_984_dldesign_0_af2pred,pae=4.79-Skp1']
+    if 'all_surf' in used_loc and 'all_surf' not in ptm_track:
+        ptm_track['all_surf']=ptm_track['ppi']+ptm_track['surf']
+    if max_only:
+        ptm_track=keep_max_ptm(ptm_track.copy(),used_ptms)
+    o={}
+    for ptm in used_ptms:
+        for loc in used_loc:
+            o[f'{loc}-{ptm}']=((ptm_track[ptm]>threshold) & (ptm_track[loc])).sum()
+    return o
 
 # %% ProPka Util
 def propka_single(pdbfile:str,optargs:List[str]=['-c=B','--protonate-all']):
@@ -410,11 +489,18 @@ def propka_single(pdbfile:str,optargs:List[str]=['-c=B','--protonate-all']):
 def ptm_propka(pdbfile:str,
     ptms:Dict[str,Tuple[Dict[str,Tuple[int,str,float]],str]],
     ptm_threshold:float=0.5,
-    sasa_threshold:float=0.):
+    mut_recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe,
+    sasa_threshold:float=0.,
+    MPOP1:bool=False):
     '''
     ptms: from `parse_musite_dir`
 
     '''
+    # ptms=ptms.copy()
+    mut_recipe_={v[0]:v[1] for v in mut_recipe.keys()}
+    for k in ptms.keys():
+        ptms[k]=(ptms[k][0],mut_recipe_.get(k,''))
+    
     with TemporaryDirectory() as tmpdir:
         chain='B'
         pdb=PDBParser(QUIET=True).get_structure('tmp',pdbfile)[0][chain]
@@ -426,13 +512,18 @@ def ptm_propka(pdbfile:str,
         for k,v in ptms.items():
             # no need to overwrite 
             if v[1]:
-                for l in v[0].get(peel_pdbfile(pdbfile),[]):
+                if MPOP1:
+                    des=peel_pdbfile(pdbfile)
+                else:
+                    des=Path(pdbfile).stem[:-7]
+                for l in v[0].get(des,[]):
                     t=l[2]>ptm_threshold and l[2]>=mutstrs.get(l[0],('',0.))[1]
                     if sasa_threshold>0:
                         t= t and sasas[l[0]-1]>sasa_threshold
                     if t:
                         # if v[1]:
                         mutstrs[l[0]]=(f"{PDBData.protein_letters_1to3[l[1]]}-{l[0]}-{v[1]}",l[2])
+        # return mutstrs
                         # else:
                         #     if l[0] in mutstrs:
                         #         mutstrs.pop(l[0])
@@ -450,3 +541,32 @@ def ptm_propka(pdbfile:str,
         else:
             pis=propka_single(f'{tmpdir}/{Path(pdbfile).stem}.pdb',optargs=[f'-c=B'])
         return pis
+    
+# %% ESM_IF Utils
+def run_esm_if(
+    pdbs:List[str],
+    chains:str|List[str],
+    )->Dict[str,pd.DataFrame]:
+    python='/hpf/projects/mkoziarski/zdeng/miniconda3/envs/stab_esm_if/bin/python'
+    script='/hpf/projects/mkoziarski/zdeng/BindCraft/tmp0305_esm_stab.py'
+    pdbs_=[]
+    for i in pdbs:
+        if ';' in i:
+            raise ValueError('No ";" allowed in file name')
+        pdbs_.append(str(Path(i).absolute()))
+    # return pdbs_
+    if isinstance(chains,list):
+        c=';'.join(chains)
+    else:
+        c=chains
+    
+    with TemporaryDirectory() as tdir:
+        run(
+            [python,script,
+             '--pdbs',';'.join(pdbs_),
+             '--chains',c,
+             '--outpkl','stb.pkl'],
+             cwd=tdir
+        )
+        o=pkl.load(open(f'{tdir}/stb.pkl','rb'))
+    return o
