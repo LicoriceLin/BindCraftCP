@@ -43,8 +43,13 @@ class Design:
         if _p.exists():
             if overwrite_outdir:
                 _p.rename(_p.with_stem(_p.stem+'_bk'))
+                self.load_previous_target_settings=''
             else:
-                 self.load_previous_target_settings=_p/f'{self.binder_name}.json'
+                _=_p/f'{self.binder_name}.json'
+                if _.exists():
+                    self.load_previous_target_settings=_
+                else:
+                    self.load_previous_target_settings=_
         else:
             self.load_previous_target_settings=''
         self._p=_p
@@ -91,6 +96,9 @@ class Design:
                 finished=[]
         else:
             finished=[]
+        skipped=self._p/'Trajectory/LowConfidence'
+        if os.path.exists(skipped):
+            finished.extend([i.stem for i in skipped.iterdir()])
         
         for length in lengths:
             af_model=None
