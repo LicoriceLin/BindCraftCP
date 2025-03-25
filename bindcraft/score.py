@@ -22,8 +22,50 @@ class Score:
         filters:filters_type=_default_mpnn_filter
         ):
         '''
-        mpnn results csv should be `{self.outdir}/Trajectory/{self.post_ana_dir}/MPNN.csv`
-        rescore csv should be `{self.outdir}/Trajectory/{self.rescore_path}/log.csv}`
+        Prefilter (maintained in Metrics Core)
+        --- ---
+        None:
+            load_metrics `Post` & filter 
+        Direct:
+            pdbfile, rescore_chains: `rescore/log.csv`
+        Templated:
+            grafted & rescore on full structures & filter: `rescore/log.csv`
+        --- ---
+
+        MPNN_Sampler
+        --- ---
+        MPNN modes: See .mpnn.MPNNSampler: `Post/MPNN.csv`
+        None:
+            No extra Steps, mpnn_df['filt']=='All_Good' 
+        Direct:
+            Direct refold & filter: `mpnn_rescore/log.csv`
+        Templated:
+            Refold with template from `rescore/{design_id}.pdb` & filter: `mpnn_rescore/log.csv`
+        --- ---
+
+        Validator (Full Rescorer)
+        --- ---
+        init from Metrics. take local target_settings / advanced_settings.
+
+        None/Direct:
+        read-in Post/MPNN.csv, choose 'All_Good', take target pdbs/chains, refold
+        Templated:
+        read-in Post/MPNN.csv, choose 'All_Good', refold with template from `rescore/{design_id}.pdb` 
+        TODO load refold results directly, no need to fold the same thing twice.
+        --- ---
+        
+        TODO:
+        a design_env class,
+        maintain Designer, Augmentor(sub-class of Metrics, with filter/rescorer/mpnn_sampler), Scorer, Collector (sub-class of Metrics)
+
+        TODO:
+        Highlight in Lab Meeting:
+        1.CycPep Designs;
+        2.Surf-Only Design for Hard-Target/Accelerations: Preliminary Positive results;
+        3.Retro-Spective Ana for old metrics (RFD-Cyc; MPOP1); 
+        4.New Metrics: PI/PTM/Stability/Interactions;
+        5.Smarter biased MPNN;
+        6.Automation of my pipelines.
         '''
         self.outdir=outdir
         self.binder_name=binder_name

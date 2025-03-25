@@ -21,6 +21,8 @@
         "*svg",
         "*png",
         "output/**",
+        "input/**",
+        "*.help",
         "diamond",
         "*.dmnd",
         "*.fasta",

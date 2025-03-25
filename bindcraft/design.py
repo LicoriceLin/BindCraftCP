@@ -1,6 +1,6 @@
 from functions import *
 from ._import import *
-
+from .bc_util import init_task
 # import os, time, gc, io
 # import contextlib
 # import json
@@ -10,7 +10,7 @@ from IPython.display import display
 
 # import numpy as np
 # from colabdesign.af.alphafold.common import residue_constants
-from .bc_util import init_task
+
 # from typing import Dict,List,Tuple,Any
 # aa_order = residue_constants.restype_order
 # order_aa = {b:a for a,b in aa_order.items()}

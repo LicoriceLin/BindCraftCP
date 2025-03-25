@@ -94,8 +94,8 @@ class Metrics:
         else:
             raise NotImplementedError
         
-    def post_process(self,prcess_recipe:Literal['miniprot_full','minimal']='miniprot_full'):
-        if prcess_recipe=='miniprotein_full':
+    def post_process(self,process_recipe:Literal['miniprot_full','minimal']='miniprot_full'):
+        if process_recipe=='miniprotein_full':
             self.cal_ptm()
             self.gen_ana_tracks()
             self.cal_ptm_feat()
@@ -106,7 +106,7 @@ class Metrics:
             self.cal_interact()
             self.cal_rog()
             self.save()
-        elif prcess_recipe=='minimal':
+        elif process_recipe=='minimal':
             self.gen_ana_tracks()
             self.cal_interact()
             self.cal_rog()
@@ -119,18 +119,8 @@ class Metrics:
         ptm=getattr(self,'ptms',None)
         if force_regen or not os.path.exists(ana_tracks_file):
             self.ana_tracks=gen_ana_tracks(self.metrics,ptm,self.sasa_threshold)
-            # if ptm is None:
-            #     self._ptm_in_track=False
-            # else:
-            #     self._ptm_in_track=True
         else:
             self.ana_tracks:Dict[str,Dict[str,str|np.ndarray]]=pkl.load(open(ana_tracks_file,'rb'))
-            # t_=next(iter(self.ana_tracks.values()))
-            # if 'Gly' in t_:
-            #     self._ptm_in_track=True
-            # else:
-            #     self._ptm_in_track=False
-            
             new_entries=[i for i in self.metrics.index if i not in self.ana_tracks]
             if len(new_entries)>0:
                 if (ptm is None)^(self._ptm_in_track):
@@ -298,6 +288,7 @@ class Metrics:
         with open(ckpt, 'wb') as f:
             pkl.dump(d, f)
 
+    
     @classmethod
     def load(cls, outdir:str|None=None,mode:Literal['design','mpnn','slice']='design',ckpt:str|None=None):
         if outdir is not None:
