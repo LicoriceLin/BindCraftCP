@@ -135,9 +135,15 @@ filters_type=Dict[str,Dict[str,float|int|bool]]
 _bc_benchmark_filters=_load_default_filters(True)
 _RFD_benchmark_filters={
     'r:plddt':{'threshold': 0.80, 'higher': True},
-    'r:i_pae':{'threshold': 10/31, 'higher': False},
+    'r:i_pae':{'threshold': 10/31, 'higher': False}, # 31 is the normalization scale in colabdesign.
     'r:rmsd':{'threshold': 1, 'higher': False},
     }
+_refold_filter_strict=_RFD_benchmark_filters
+_refold_filter_loose={'r:plddt':{'threshold': 0.7, 'higher': True},
+    'r:i_pae':{'threshold': 0.4, 'higher': False},
+    'r:rmsd':{'threshold': 2, 'higher': False}
+    }
+
 _bc_design_benchmark_filters={
     'pLDDT':{'threshold': 0.70, 'higher': True},
     'n_InterfaceResidues':{'threshold': 3, 'higher': True},
@@ -148,9 +154,9 @@ _default_filters=_load_default_filters()
 _simpliest_filter={'pLDDT':{'threshold': 0.70, 'higher': True}}
 
 def _check_filters(entry:pd.Series, filters:dict=_default_filters):
-    # check mpnn_data against labels
-    # mpnn_dict = {label: value for label, value in zip(design_labels, mpnn_data)}
-
+    '''
+    only check consensus cols in `entry` and `filters`
+    '''
     unmet_conditions = []
 
     # check filters against thresholds
@@ -228,3 +234,11 @@ def show_filter(metrics:pd.DataFrame)->Tuple[plt.Figure,plt.Axes]: #,filters:dic
             # tick.set_text('All Good')
 
     return fig,ax
+
+
+def is_pickleable(obj) -> bool:
+    try:
+        pkl.dumps(obj)
+        return True
+    except Exception:
+        return False

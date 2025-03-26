@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from ._import import *
-from .util import id2pdbfile
+from .util import id2pdbfile,is_pickleable
 from itertools import product, combinations
 from sklearn.cluster import SpectralClustering
 from colabdesign.af.alphafold.common import residue_constants
@@ -27,15 +27,23 @@ _other_esm_threshold=0.5
 _default_penalties_values=dict(Sp=math.log(1/0.5),Hp=math.log(1/0.25),No=float(1e6),Null=0.)
 
 class PenaltyRecipe:
-    def __init__(self,name:str,select_func:Callable[[pd.Series],bool],
-        aas_s:Dict[str,str],penalties_values:Dict[str,float]=_default_penalties_values
-            ):
+    def __init__(self,name:str,select_func_expr:str="lambda s: s['seq']=='C' and s['surf']",
+        aas_s:Dict[str,str]={'Null':all_aa},penalties_values:Dict[str,float]=_default_penalties_values,
+        select_func:Callable[[pd.Series],bool]|None=None
+        ):
         '''
+        select_func_expr: something could be solved by `eval` into select_func
         aas_s: something like: {'No':'C','Hp':'N','Sp':'DE'}
         penalties_values: something like: {'Hp',-4}
+        select_func would override select_func_expr. only use named func for it.
         '''
         self.name=name
-        self.select_func=select_func
+        if select_func is not None:
+            self.select_func:Callable[[pd.Series],bool]=select_func
+            self.select_func_expr=''
+        else:
+            self.select_func:Callable[[pd.Series],bool]=eval(select_func_expr)
+            self.select_func_expr=select_func_expr
         self.aas_s=aas_s
         self.penalties=penalties_values
     
@@ -48,34 +56,45 @@ class PenaltyRecipe:
                 penalty=self.penalties.get(k,0.)
                 bias=_add_bias(bias,pos,aas,penalty)
         return bias
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if not is_pickleable(state.get('select_func','')):
+            state['select_func'] = None  
+        return state
+
+    def __setstate__(self, state:Dict[str,Any]):
+        if state['select_func'] is None and state.get('select_func_expr','None'):
+            state['select_func'] = eval(state['select_func_expr'])
+        self.__dict__.update(state)
         # if penalty is None:
         #     self.penalty=penalties.get(self.name.split('-')[-1],0.)
         # else:
         #     self.penalty=penalty
 
 default_penalty_recipes=[
-    PenaltyRecipe('Surf-C',lambda s: s['seq']=='C' and s['surf'],{'No':'C','Sp':'DE'}),
-    PenaltyRecipe('Surf-DE',lambda s: s['seq'] in ['D','E'] and s['surf'],{'No':'C','Sp':'DE'}),
-    PenaltyRecipe('Surf-MeR',lambda s: s['MeR']>_ptm_threshold and s['surf'],{'No':'C','Sp':'DE','Hp':'R'}),
+    PenaltyRecipe('Surf-C',"lambda s: s['seq']=='C' and s['surf']",{'No':'C','Sp':'DE'}),
+    PenaltyRecipe('Surf-DE',"lambda s: s['seq'] in ['D','E'] and s['surf']",{'No':'C','Sp':'DE'}),
+    PenaltyRecipe('Surf-MeR',"lambda s: s['MeR']>_ptm_threshold and s['surf']",{'No':'C','Sp':'DE','Hp':'R'}),
     
-    PenaltyRecipe('Surf/PPi-GlyN',lambda s: s['GlyN']>_ptm_threshold and (not s['core']),{'No':'C','Hp':'N','Sp':'DE'}),
-    PenaltyRecipe('Surf/PPi-GlyO',lambda s: s['GlyO']>_ptm_threshold and (not s['core']),{'No':'C','Hp':'ST','Sp':'DE'}),
+    PenaltyRecipe('Surf/PPi-GlyN',"lambda s: s['GlyN']>_ptm_threshold and (not s['core'])",{'No':'C','Hp':'N','Sp':'DE'}),
+    PenaltyRecipe('Surf/PPi-GlyO',"lambda s: s['GlyO']>_ptm_threshold and (not s['core'])",{'No':'C','Hp':'ST','Sp':'DE'}),
 
-    PenaltyRecipe('PPI-C',lambda s: s['seq']=='C' and s['ppi'],{'Sp':'MK','Hp':'C'}),
-    PenaltyRecipe('PPI-MeR',lambda s: s['MeR']>_ptm_threshold and s['ppi'],{'Sp':'M','Hp':'CR'}),
-    PenaltyRecipe('PPI-AcK',lambda s: s['AcK']>_ptm_threshold and s['ppi'],{'Sp':'M','Hp':'CK'}),
+    PenaltyRecipe('PPI-C',"lambda s: s['seq']=='C' and s['ppi']",{'Sp':'MK','Hp':'C'}),
+    PenaltyRecipe('PPI-MeR',"lambda s: s['MeR']>_ptm_threshold and s['ppi']",{'Sp':'M','Hp':'CR'}),
+    PenaltyRecipe('PPI-AcK',"lambda s: s['AcK']>_ptm_threshold and s['ppi']",{'Sp':'M','Hp':'CK'}),
     
-    PenaltyRecipe('PPI-esm_if',lambda s: s['esm_if']<_ppi_esm_threshold and s['ppi'], {'Sp':'MK','Hp':'C'}),
+    PenaltyRecipe('PPI-esm_if',"lambda s: s['esm_if']<_ppi_esm_threshold and s['ppi']", {'Sp':'MK','Hp':'C'}),
     # PenaltyRecipe('Surf-esm_if',lambda s: s['esm_if']<0.5 and s['surf'], {'No':'C','Sp':'DE'}),
-    PenaltyRecipe('Surf-esm_if',lambda s: s['esm_if']<_other_esm_threshold and s['surf'], {'No':'C','Hp':'DE'}),
-    PenaltyRecipe('Core-esm_if',lambda s: s['esm_if']<_other_esm_threshold and s['core'], {'Null':all_aa}),
+    PenaltyRecipe('Surf-esm_if',"lambda s: s['esm_if']<_other_esm_threshold and s['surf']", {'No':'C','Hp':'DE'}),
+    PenaltyRecipe('Core-esm_if',"lambda s: s['esm_if']<_other_esm_threshold and s['core']", {'Null':all_aa}),
 
-    PenaltyRecipe('PPI-interact',lambda s: s['interacts']==-1,{'Hp':'C'}),
+    PenaltyRecipe('PPI-interact',"lambda s: s['interacts']==-1",{'Hp':'C'}),
     ]
 
 minimal_penalty_recipes=[
-    PenaltyRecipe('Surf',lambda s: bool(s['surf']),{'No':'C'}),
-    PenaltyRecipe('Core',lambda s: bool(s['core']),{'Null':all_aa}),
+    PenaltyRecipe('Surf',"lambda s: bool(s['surf'])",{'No':'C'}),
+    PenaltyRecipe('Core',"lambda s: bool(s['core'])",{'Null':all_aa}),
     ]
 
 def gen_mpnn_bias(
@@ -157,7 +176,7 @@ def cluster_and_get_medoids(distance_matrix, num_clusters=5):
 def run_mpnn(
     ana_tracks:Dict[str,Dict[str,str|np.ndarray]],
     designid2pdb:Callable[[str],str]|None=None,
-    mode:Literal['biased',"whole",'non_ppi']='bias',
+    mode:Literal['bias',"whole",'non_ppi']='bias',
     mpnn_bias:Dict[str,np.ndarray]|None=None,
     max_mpnn_sequences:int=5,num_sample:int=30,seed:int=42,
     outdir:str|None=None,
@@ -165,6 +184,7 @@ def run_mpnn(
     ):
     '''
     `outdir` are used for default `designid2pdb`
+    `seed` would overwrite seed in `model_params`
     '''
     model_params.update({'seed':seed})
     mpnn_dfs=[]
@@ -215,15 +235,19 @@ def run_mpnn(
         mpnn_df_.loc[design_id]={'seq':ptm_track['seq'],'score':ori_score}
         mpnn_df_['design_id']=design_id
         mpnn_dfs.append(mpnn_df_)
-    sum_mpnn_df=pd.concat(mpnn_dfs)
+    if len(mpnn_dfs)>0:
+        sum_mpnn_df=pd.concat(mpnn_dfs)
+    else:
+        sum_mpnn_df=pd.DataFrame(columns=['Design','seq','score','design_id']).set_index('Design')
     return sum_mpnn_df
 
+_default_model_params=dict(backbone_noise=0.0,model_name='v_48_020',weights='soluble',seed=42)
 class MPNNSampler:
     def __init__(self,
         metrics:Metrics,
         filter:bool=True,
         penalty_recipes:List[PenaltyRecipe]=default_penalty_recipes,
-        model_params:Dict[str,Any]=dict(backbone_noise=0.0,model_name='v_48_020',weights='soluble',seed=42)
+        model_params:Dict[str,Any]=_default_model_params
         ):
         '''
         filter: only run those with 'All_Good' in metrics.metrics['filt']
@@ -270,5 +294,7 @@ class MPNNSampler:
     def dump_samples(self,dir_name:str='Post',file_stem:str='MPNN'):
         self.mpnn_df.to_csv(self.Metrics.outdir+'/'+self.Metrics._subdir+f'/{dir_name}/{file_stem}.csv',index_label='Design')
 
+    def load_samples(self,dir_name:str='Post',file_stem:str='MPNN'):
+        self.mpnn_df=pd.read_csv(self.Metrics.outdir+'/'+self.Metrics._subdir+f'/{dir_name}/{file_stem}.csv').set_index('Design')
 # def mpnn_grafted_rescore():
 #     pass

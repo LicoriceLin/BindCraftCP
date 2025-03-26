@@ -17,7 +17,7 @@ from .biophy_metrics import (
 from .mda_metrics import cal_ppi_interacts,cal_rog
 
 # if TYPE_CHECKING:
-from .mpnn import MPNNSampler,minimal_penalty_recipes,PenaltyRecipe
+from .mpnn import MPNNSampler,minimal_penalty_recipes,PenaltyRecipe,_default_model_params
 
 
 # %% post analysis
@@ -46,47 +46,46 @@ def _default_ptm_feat_recipe(ptm_track:Dict[str,str|np.ndarray]):
     o['Surf-MeR'] = ( (ptm_track['MeR']>0.5) & (ptm_track['surf'])).sum()
     return o
 
+_default_refold_model_params=dict(
+    use_multimer=False, use_initial_guess=True, use_initial_atom_pos=True)
 class Metrics:
     def __init__(self,
         outdir:str,
         mode:Literal['design','mpnn','slice']='design',
-        # ptm:bool=True,
-        # esm:bool=True,
-        # pi:bool=True,
-        # ptm_pi:bool=True,
-        # misc:bool=True,
-        # mut_recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe,
-        ):
+        post_stem:str='Post',):
         
         self.outdir=outdir
         self.mode=mode
+        _p=self.post_stem=post_stem
         if mode=='design':
             self.metrics:pd.DataFrame=read_design_metrics(outdir)
             _s=self._subdir='Trajectory'
-            os.makedirs(f'{outdir}/{_s}/Post',exist_ok=True)
+            os.makedirs(f'{outdir}/{_s}/{_p}',exist_ok=True)
             self.ana_paths=dict(
-                    fasta=f'{outdir}/{_s}/Post/design.fa',
+                    fasta=f'{outdir}/{_s}/{_p}/design.fa',
                     musite_dir=f'{outdir}/{_s}/Ptm',
-                    esm_if_file=f'{outdir}/{_s}/Post/esm_if.pkl',
-                    ana_tracks_file=f'{outdir}/{_s}/Post/init_ana_tracks.pkl',
-                    pis_file=f'{outdir}/{_s}/Post/pis.pkl',
-                    modi_pis_file=f'{outdir}/{_s}/Post/modi_pis.pkl',
-                    mda_ana_file=f'{outdir}/{_s}/Post/mda.pkl',
-                    Metrics=f'{outdir}/{_s}/Post/Metrics.pkl',
+                    esm_if_file=f'{outdir}/{_s}/{_p}/esm_if.pkl',
+                    ana_tracks_file=f'{outdir}/{_s}/{_p}/init_ana_tracks.pkl',
+                    pis_file=f'{outdir}/{_s}/{_p}/pis.pkl',
+                    modi_pis_file=f'{outdir}/{_s}/{_p}/modi_pis.pkl',
+                    mda_ana_file=f'{outdir}/{_s}/{_p}/mda.pkl',
+                    Metrics=f'{outdir}/{_s}/{_p}/Metrics.pkl',
+                    post_dir=f'{outdir}/{_s}/{_p}/',
                 )
-        elif mode=='mpnn':
+        elif mode=='mpnn': # TODO change to `rescore`
             self.metrics:pd.DataFrame=read_bc_metrics(outdir)
-            os.makedirs(f'{outdir}/MPNN/Post',exist_ok=True)
+            os.makedirs(f'{outdir}/MPNN/{_p}',exist_ok=True)
             _s=self._subdir='MPNN'
             self.ana_paths=dict(
-                    fasta=f'{outdir}/{_s}/Post/design.fa',
+                    fasta=f'{outdir}/{_s}/{_p}/design.fa',
                     musite_dir=f'{outdir}/{_s}/Ptm',
-                    esm_if_file=f'{outdir}/{_s}/Post/esm_if.pkl',
-                    ana_tracks_file=f'{outdir}/{_s}/Post/init_ana_tracks.pkl',
-                    pis_file=f'{outdir}/{_s}/Post/pis.pkl',
-                    modi_pis_file=f'{outdir}/{_s}/Post/modi_pis.pkl',
-                    mda_ana_file=f'{outdir}/{_s}/Post/mda.pkl',
-                    Metrics=f'{outdir}/{_s}/Post/Metrics.pkl',
+                    esm_if_file=f'{outdir}/{_s}/{_p}/esm_if.pkl',
+                    ana_tracks_file=f'{outdir}/{_s}/{_p}/init_ana_tracks.pkl',
+                    pis_file=f'{outdir}/{_s}/{_p}/pis.pkl',
+                    modi_pis_file=f'{outdir}/{_s}/{_p}/modi_pis.pkl',
+                    mda_ana_file=f'{outdir}/{_s}/{_p}/mda.pkl',
+                    Metrics=f'{outdir}/{_s}/{_p}/Metrics.pkl',
+                    post_dir=f'{outdir}/{_s}/{_p}/',
                 )
         elif mode=='slice':
             # self.outdir=f'slice:{self.outdir}'
@@ -94,8 +93,8 @@ class Metrics:
         else:
             raise NotImplementedError
         
-    def post_process(self,process_recipe:Literal['miniprot_full','minimal']='miniprot_full'):
-        if process_recipe=='miniprotein_full':
+    def post_process(self,process_recipe:Literal['miniprot_full','minimal']='minimal'):
+        if process_recipe=='miniprot_full':
             self.cal_ptm()
             self.gen_ana_tracks()
             self.cal_ptm_feat()
@@ -111,6 +110,8 @@ class Metrics:
             self.cal_interact()
             self.cal_rog()
             self.save()
+        else:
+            raise ValueError
         
     def gen_ana_tracks(self,sasa_threshold:float=0.4,force_regen:bool=False):
         print('generate Residue Tracks')
@@ -290,24 +291,25 @@ class Metrics:
 
     
     @classmethod
-    def load(cls, outdir:str|None=None,mode:Literal['design','mpnn','slice']='design',ckpt:str|None=None):
+    def load(cls, outdir:str|None=None,mode:Literal['design','mpnn','slice']='design',post_stem:str='Post',ckpt:str|None=None):
+        _p=post_stem
         if outdir is not None:
             if ckpt is not None:
                 print('`ckpt` are overloaded by `outdir`')
-            m=f'{outdir}/Trajectory/Post/Metrics.pkl'
-            ret=cls(outdir,mode)
+            m=f'{outdir}/Trajectory/{_p}/Metrics.pkl'
+            ret=cls(outdir=outdir,mode=mode,post_stem=post_stem)
             with open(m, 'rb') as f:
                 ret.__dict__.update(pkl.load(f))
             return ret
         else:
-            assert ckpt is None
+            assert ckpt is not None
             with open(ckpt, 'rb') as f:
                 d:dict=pkl.load(f)
             ret=cls(d['outdir'],'slice')
             ret.__dict__.update(d)
             return ret
     
-    def filter(self,filters:filters_type=_simpliest_filter):
+    def _filter(self,filters:filters_type=_simpliest_filter):
         self.filters=filters
         check_filters(self.metrics,filters)
 
@@ -369,8 +371,9 @@ class Metrics:
             d['ana_paths']={k: v+'.slice' if v.endswith('.slice') else v 
                 for k,v in self.ana_paths.items()}
         
-        if 'metrics' in d:
-            d['metrics']=self.metrics.loc[key].copy()
+        for i in ['metrics','mpnn_df','refold_df']:
+            if i in d:
+                d['metrics']=self.metrics.loc[key].copy()
         for i in ['ana_tracks','pis','modi_pis','esm_if_o']:
             if i in d:
                 d[i]={k:v for k,v in getattr(self,i).items() if k in key}
@@ -388,34 +391,129 @@ class Metrics:
     def __len__(self):
         return len(self.metrics)
     
-    def init_rescore(self,
+    def _init_refold(self,
         cyclic:bool=False,
-        model_kwargs:Dict[str,bool]=dict(
-            use_multimer=False, 
-            use_initial_guess=True, 
-            use_initial_atom_pos=True),
-        reload_rescore_dir:str|None=None,
+        model_params:Dict[str,bool]=_default_refold_model_params,
+        reload_refold_dir:str|None=None,
         reload_mpnn:bool=False):
-        self._rescorer=ReScorer(self,cyclic=cyclic,model_kwargs=model_kwargs)
-        if reload_rescore_dir is not None:
-            self._rescorer.reload_rescore_log(rescore_dir=reload_rescore_dir,mpnn=reload_mpnn)
-        return self._rescorer
+        self._refolder=ReFolder(self,cyclic=cyclic,model_params=model_params)
+        if reload_refold_dir is not None:
+            self._refolder.reload_refold_log(refold_dir=reload_refold_dir,mpnn=reload_mpnn)
+        return self._refolder
     
-    def init_visualize(self,
+    def _init_visualize(self,
         ana_dir_name:str='Post',
         filters:Dict[str,Dict[str,float|int|bool]]=_simpliest_filter):
         self.filters=filters
         self._visualizer=MetricsVisualizer(self,ana_dir_name)
         return self._visualizer
     
-    def init_mpnn_sample(self,filter=True,
+    def _init_mpnn_sample(self,filter=True,
         penalty_recipes:List[PenaltyRecipe]=minimal_penalty_recipes,
-        model_params:Dict[str,Any]=dict(backbone_noise=0.0,model_name='v_48_020',weights='soluble',seed=42)):
+        model_params:Dict[str,Any]=_default_model_params):
         self._mpnn_sampler=MPNNSampler(self,filter=filter,penalty_recipes=penalty_recipes,model_params=model_params)
 
         return self._mpnn_sampler
         
-        
+    def filter(self,
+        refold_mode:Literal['none','direct','templated']='none',
+        refold_target:str='',refold_chain:str='',
+        refold_dir:str='rescore',graft_dir:str='graft',
+        model_params:Dict[str,bool]=_default_refold_model_params,
+        filters:filters_type=_simpliest_filter,
+        cyclic:bool=False,seed:int=42,pred_models=[0],
+        ):
+        '''
+        self._refolder should be initialized here.
+        Note: it could reload `log.pkl` from `refold_dir` and only run new entries.
+        '''
+        self.refold_mode=refold_mode
+        if refold_mode!='none':
+            assert refold_target and refold_chain
+            refolder=self._init_refold(
+                model_params=model_params,cyclic=cyclic,
+                reload_refold_dir=refold_dir)
+            refold_args=dict(refold_target=refold_target,
+                refold_chain=refold_chain,
+                refold_dir=refold_dir,
+                seed=seed,pred_models=pred_models)
+            # self.
+            self.r_subdir=refold_dir
+            if refold_mode=='direct':
+                refolder.refold_direct(**refold_args)
+            elif refold_mode=='templated':
+                self.g_subdir=graft_dir
+                refold_args['graft_dir']=graft_dir
+                refolder.refold_templated(**refold_args)
+            else:
+                raise ValueError
+            self.refold_args=refold_args
+            self.refold_df=self._refolder.refold_df
+            use_col=[k.replace('r:','') for k in filters.keys() if k.startswith('r:')]
+            refolder.merge_refold_metrics(use_col=use_col)
+        self._filter(filters)
+        self.save()
+
+    def mpnn_sample(self,
+        mode:Literal['biased',"whole",'non_ppi']='bias',
+        max_mpnn_sequences:int=5,num_sample:int=30,
+        mpnn_refold_dir:str='mpnn_rescore',mpnn_stem:str='MPNN',
+        penalty_recipes:List[PenaltyRecipe]=minimal_penalty_recipes,
+        model_params:Dict[str,Any]=_default_model_params,
+        pred_models=[0],seed:int=42,
+        ):
+        self.mpnn_mode=mode
+
+        model_params['seed']=seed
+        _filter= 'filt' in self.metrics.columns 
+        self.mpnn_args=dict(
+            filter=_filter,
+            penalty_recipes=penalty_recipes,model_params=model_params,
+            mode=mode,max_mpnn_sequences=max_mpnn_sequences,
+            num_sample=num_sample,seed=seed
+            )
+        mpnn_sampler=self._init_mpnn_sample(filter=_filter,
+            penalty_recipes=penalty_recipes,model_params=model_params)
+        if os.path.exists(self.ana_paths['post_dir']+f'{mpnn_stem}.csv'):
+            mpnn_sampler.load_samples(self.post_stem,mpnn_stem)
+        else:
+            mpnn_sampler.run_mpnn(mode=mode,max_mpnn_sequences=max_mpnn_sequences,
+                num_sample=num_sample,seed=seed
+                )
+        mpnn_df=mpnn_sampler.mpnn_df
+        refold_mode:str=getattr(self,'refold_mode','none')
+        if refold_mode != 'none':
+            assert hasattr(self,'_refolder'), 'run filter first!'
+            refolder=self._refolder
+            self.m_subdir=mpnn_refold_dir
+            _refold_method= {'direct':refolder.refold_direct_mpnn,
+                'templated':refolder.refold_templated_mpnn}[refold_mode]
+            self.mpnn_refold_args=dict(
+                seed=seed,pred_models=pred_models)
+            mpnn_refold_df=_refold_method(
+                mpnn_df=mpnn_df,mpnn_refold_dir=mpnn_refold_dir,**self.mpnn_refold_args
+                ).copy()
+            use_col=[k.replace('r:','') for k in self.filters.keys() if k.startswith('r:')]
+            mpnn_refold_df_=mpnn_refold_df[use_col]
+            mpnn_refold_df_.columns=['r:'+i for i in mpnn_refold_df_]
+            for i in mpnn_refold_df_.columns:
+                if i in mpnn_df.columns:
+                    mpnn_df.drop(i,axis=1,inplace=True)
+            mpnn_df=pd.merge(left=mpnn_df, right=mpnn_refold_df_, left_index=True, right_index=True)
+            mpnn_df=check_filters(mpnn_df,self.filters)
+        else:
+            mpnn_df['filt']='All_Good'
+        mpnn_sampler.mpnn_df=mpnn_df
+        self.mpnn_df=mpnn_df
+        self.mpnn_stem=mpnn_stem
+        mpnn_sampler.dump_samples(file_stem=mpnn_stem)
+        self.save()
+        return self.mpnn_df
+    
+    def rescore(self):
+        raise NotImplementedError
+    
+    
 class MetricsVisualizer:
     def __init__(self,
         metrics:Metrics,
@@ -469,158 +567,215 @@ class MetricsVisualizer:
     def plot_tracks(self):
         raise NotImplementedError
     
-class ReScorer:
+class ReFolder:
+    #TODO rescore->refold
     def __init__(self,
         metrics:Metrics,
         cyclic:bool=False,
-        model_kwargs:Dict[str,bool]=dict(
-            use_multimer=False, 
-            use_initial_guess=True, 
-            use_initial_atom_pos=True)):
+        model_params:Dict[str,bool]=_default_refold_model_params):
         self.Metrics=metrics
         self.cyclic=cyclic
-        self.model_kwargs=model_kwargs
+        self.model_params=model_params
     
-    def rescore_seqonly(self,
-        rescore_target:str,rescore_chain:str,rescore_dir:str='rescore',
-        seed:int=42,pred_models=[0]):
+    def refold_direct(self,
+        refold_target:str,
+        refold_chain:str,
+        refold_dir:str='rescore',
+        seed:int=42,pred_models:List[int]=[0]):
         '''
         '''
-        self.rescore_target=rescore_target
-        self.rescore_chain=rescore_chain
+        self.refold_target=refold_target
+        self.refold_chain=refold_chain
         self.cyclic=self.cyclic
         self.seed=seed
         self.pred_models=pred_models
-        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+rescore_dir
+        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+refold_dir
         self.r_dir=r_dir
         os.makedirs(r_dir,exist_ok=True)
-
-        logs={}
+        self.reload_refold_log(refold_dir,mpnn=False)
+        logs:Dict[str,Dict[str,Any]]=getattr(self,'refold_log',{})
         prev_l=-1
         model=self.complex_prediction_model
 
         m_=self.Metrics['Sequence'].sort_values(key=lambda x:x.str.len())
         for design_id,seq in tqdm(m_.items()):
-            l=len(seq)
-            if l!= prev_l:
-                model.prep_inputs(
-                        pdb_filename=rescore_target,#
-                        chain=rescore_chain, 
-                        binder_len=l, 
-                        rm_target_seq=False,
-                        rm_target_sc=False,
-                        seed=seed)
-                if self.cyclic:
-                    add_cyclic_offset(model, offset_type=2)
-                prev_l=l
-            aux:dict=model.predict(seq=seq,models=pred_models,
-                num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
-            for i in ['hard','soft','temp','seqid','recycles','models']:
-                aux.pop(i,None)
-            model_pdb_path=f'{r_dir}/{design_id}.pdb'
-            model.save_current_pdb(model_pdb_path)
-            binder_contacts = hotspot_residues(model_pdb_path)
-            aux['n_contact'] = len(binder_contacts.items())
-            aux['contacts']=binder_contacts
-            aux['r_pdb']=model_pdb_path
-            logs[design_id]=aux
-        self.rescore_log=logs
-        self.rescore_df=pd.DataFrame(self.rescore_log).T
+            if design_id not in logs:
+                l=len(seq)
+                if l!= prev_l:
+                    model.prep_inputs(
+                            pdb_filename=refold_target,#
+                            chain=refold_chain, 
+                            binder_len=l, 
+                            rm_target_seq=False,
+                            rm_target_sc=False,
+                            seed=seed)
+                    if self.cyclic:
+                        add_cyclic_offset(model, offset_type=2)
+                    prev_l=l
+                aux:dict=model.predict(seq=seq,models=pred_models,
+                    num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
+                for i in ['hard','soft','temp','seqid','recycles','models']:
+                    aux.pop(i,None)
+                model_pdb_path=f'{r_dir}/{design_id}.pdb'
+                model.save_current_pdb(model_pdb_path)
+                binder_contacts = hotspot_residues(model_pdb_path)
+                aux['n_contact'] = len(binder_contacts.items())
+                aux['contacts']=binder_contacts
+                aux['r_pdb']=model_pdb_path
+                logs[design_id]=aux
+            
+        self.refold_log=logs
+        self.refold_df=pd.DataFrame(self.refold_log).T
+        self._rescue_empty_df(False)
         with open(r_dir+'/log.pkl','wb') as f:
             pkl.dump(logs,f)
-        self.rescore_df.to_csv(r_dir+'/log.csv',index_label='Design')
-        return self.rescore_log
+        self.refold_df.to_csv(r_dir+'/log.csv',index_label='Design')
+        return self.refold_df
     
-    def rescore_grafttemp(self,rescore_target:str,rescore_chain:str,
-        graft_dir:str='graft',rescore_dir:str='rescore',
-        seed:int=42,pred_models=[0]):
+    def refold_templated(self,refold_target:str,refold_chain:str,
+        graft_dir:str='graft',refold_dir:str='rescore',
+        seed:int=42,pred_models:List[int]=[0]):
         '''
         '''
-        assert 'B' not in rescore_chain
+        assert 'B' not in refold_chain
+        self.refold_target=refold_target
+        self.refold_chain=refold_chain
 
         g_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+graft_dir
         self.g_dir=g_dir
-        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+rescore_dir
+        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+refold_dir
         self.r_dir=r_dir
         os.makedirs(g_dir,exist_ok=True)
         os.makedirs(r_dir,exist_ok=True)
         
         model=self.complex_prediction_model
-        logs={}
+        self.reload_refold_log(refold_dir,mpnn=False)
+        logs:Dict[str,Dict[str,Any]]=getattr(self,'refold_log',{})
         for design_id,pdb_ in tqdm(self.Metrics._pdbs.items()):
-            g_pdb=g_dir+f'/{design_id}.pdb'
-            _graft_binder(pdb_,rescore_target,rescore_chain,g_pdb)
-            # grafted_pdbs[design_id]=g_pdb
-            
-            s=self.Metrics.metrics.loc[design_id]
-            seq=s['Sequence']
-            model.prep_inputs(
-                pdb_filename=g_pdb, 
-                chain=rescore_chain, binder_chain='B', binder_len=len(seq), 
-                use_binder_template=True, rm_target_seq=False,
-                rm_target_sc=False, rm_template_ic=True,seed=seed)
-            if self.cyclic:
-                add_cyclic_offset(model, offset_type=2)
-            aux:Dict[str,float]=model.predict(seq=seq,models=pred_models,
-                num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
-            for i in ['hard','soft','temp','seqid','recycles','models']:
-                aux.pop(i,None)
-            model_pdb_path=f'{r_dir}/{design_id}.pdb'
-            if os.path.exists(model_pdb_path):
-                os.remove(model_pdb_path)
-            model.save_current_pdb(model_pdb_path)
-            binder_contacts = hotspot_residues(model_pdb_path)
-            aux['n_contact'] = len(binder_contacts.items())
-            aux['contacts']=binder_contacts
-            aux['g_pdb']=g_pdb
-            aux['r_pdb']=model_pdb_path
-            logs[design_id]=aux
-        
-        self.rescore_log=logs
-        with open(r_dir+'/log.pkl','wb') as f:
-            pkl.dump(logs,f)
-        self.rescore_df=pd.DataFrame(self.rescore_log).T
-        self.rescore_df.to_csv(r_dir+'/log.csv',index_label='Design')
-        return self.rescore_log
-
-    def rescore_from_mpnn(self,mpnn_df:pd.DataFrame,mpnn_rescore_dir:str='mpnn_rescore',seed=42,pred_models=[0]):
-        # for design_id, sub_df in mpnn_df.groupby(by='design_id')
-        m_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+mpnn_rescore_dir
-        self.m_dir=m_dir
-        os.makedirs(m_dir,exist_ok=True)
-        model=self.complex_prediction_model
-        logs={}
-        for design_id,sub_df in tqdm(mpnn_df.groupby(by='design_id')):
-            model.prep_inputs(
-                pdb_filename=self.rescore_df['r_pdb'][design_id], 
-                chain='A', binder_chain='B', binder_len=len(sub_df['seq'].iloc[0]), 
-                use_binder_template=True, rm_target_seq=False,
-                rm_target_sc=False, rm_template_ic=True,seed=seed)
-            if self.cyclic:
-                add_cyclic_offset(model, offset_type=2)
-            for mpnn_id,seq in sub_df['seq'].items():
+            if design_id not in logs:
+                g_pdb=g_dir+f'/{design_id}.pdb'
+                _graft_binder(pdb_,refold_target,refold_chain,g_pdb)
+                # grafted_pdbs[design_id]=g_pdb
+                
+                s=self.Metrics.metrics.loc[design_id]
+                seq=s['Sequence']
+                model.prep_inputs(
+                    pdb_filename=g_pdb, 
+                    chain=refold_chain, binder_chain='B', binder_len=len(seq), 
+                    use_binder_template=True, rm_target_seq=False,
+                    rm_target_sc=False, rm_template_ic=True,seed=seed)
+                if self.cyclic:
+                    add_cyclic_offset(model, offset_type=2)
                 aux:Dict[str,float]=model.predict(seq=seq,models=pred_models,
                     num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
                 for i in ['hard','soft','temp','seqid','recycles','models']:
                     aux.pop(i,None)
-                model_pdb_path=f'{m_dir}/{mpnn_id}.pdb'
+                model_pdb_path=f'{r_dir}/{design_id}.pdb'
                 if os.path.exists(model_pdb_path):
                     os.remove(model_pdb_path)
                 model.save_current_pdb(model_pdb_path)
                 binder_contacts = hotspot_residues(model_pdb_path)
                 aux['n_contact'] = len(binder_contacts.items())
                 aux['contacts']=binder_contacts
+                aux['g_pdb']=g_pdb
                 aux['r_pdb']=model_pdb_path
-                logs[mpnn_id]=aux
-        self.mpnn_rescore_log=logs
+                logs[design_id]=aux
+            
+        self.refold_log=logs
+        with open(r_dir+'/log.pkl','wb') as f:
+            pkl.dump(logs,f)
+        self.refold_df=pd.DataFrame(self.refold_log).T
+        self._rescue_empty_df(False)
+        self.refold_df.to_csv(r_dir+'/log.csv',index_label='Design')
+        return self.refold_df
+
+    def refold_direct_mpnn(self,mpnn_df:pd.DataFrame,mpnn_refold_dir:str='mpnn_rescore',seed=42,pred_models:List[int]=[0]):
+        assert hasattr(self,'refold_target') and hasattr(self,'refold_chain'),'manually set self.refold_{target,chain}'
+        m_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+mpnn_refold_dir
+        self.m_dir=m_dir
+        os.makedirs(m_dir,exist_ok=True)
+        model=self.complex_prediction_model
+        self.reload_refold_log(mpnn_refold_dir,mpnn=True)
+        logs:Dict[str,Dict[str,Any]]=getattr(self,'mpnn_refold_log',{})
+        m_=mpnn_df['seq'].sort_values(key=lambda x:x.str.len())
+        prev_l=-1
+        for design_id,seq in tqdm(m_.items()):
+            if design_id not in logs:
+                l=len(seq)
+                if l!= prev_l:
+                    model.prep_inputs(
+                            pdb_filename=self.refold_target,
+                            chain=self.refold_chain, 
+                            binder_len=l, 
+                            rm_target_seq=False,
+                            rm_target_sc=False,
+                            seed=seed)
+                    if self.cyclic:
+                        add_cyclic_offset(model, offset_type=2)
+                    prev_l=l
+                aux:dict=model.predict(seq=seq,models=pred_models,
+                    num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
+                for i in ['hard','soft','temp','seqid','recycles','models']:
+                    aux.pop(i,None)
+                model_pdb_path=f'{m_dir}/{design_id}.pdb'
+                model.save_current_pdb(model_pdb_path)
+                binder_contacts = hotspot_residues(model_pdb_path)
+                aux['n_contact'] = len(binder_contacts.items())
+                aux['contacts']=binder_contacts
+                aux['r_pdb']=model_pdb_path
+                logs[design_id]=aux
+            
+        self.mpnn_refold_log=logs
+        self.mpnn_refold_df=pd.DataFrame(self.mpnn_refold_log).T
         with open(m_dir+'/log.pkl','wb') as f:
             pkl.dump(logs,f)
-        self.mpnn_rescore_df=pd.DataFrame(self.mpnn_rescore_log).T
-        self.mpnn_rescore_df.to_csv(m_dir+'/log.csv',index_label='Design')
-        return self.mpnn_rescore_df
+        self._rescue_empty_df(mpnn=True)
+        self.mpnn_refold_df.to_csv(m_dir+'/log.csv',index_label='Design')
+        return self.mpnn_refold_df
+
+    def refold_templated_mpnn(self,mpnn_df:pd.DataFrame,mpnn_refold_dir:str='mpnn_rescore',seed=42,pred_models:List[int]=[0]):
+        # for design_id, sub_df in mpnn_df.groupby(by='design_id')
+        assert hasattr(self,'refold_df'),'run `reload_refold_log` or `refold_*` first!'
+        m_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+mpnn_refold_dir
+        self.m_dir=m_dir
+        os.makedirs(m_dir,exist_ok=True)
+        model=self.complex_prediction_model
+        self.reload_refold_log(mpnn_refold_dir,mpnn=True)
+        logs:Dict[str,Dict[str,Any]]=getattr(self,'mpnn_refold_log',{})
+        for design_id,sub_df in tqdm(mpnn_df.groupby(by='design_id')):
+            model.prep_inputs(
+                pdb_filename=self.refold_df['r_pdb'][design_id], 
+                chain='A', binder_chain='B', binder_len=len(sub_df['seq'].iloc[0]), 
+                use_binder_template=True, rm_target_seq=False,
+                rm_target_sc=False, rm_template_ic=True,seed=seed)
+            if self.cyclic:
+                add_cyclic_offset(model, offset_type=2)
+            for mpnn_id,seq in sub_df['seq'].items():
+                if mpnn_id not in logs:
+                    aux:Dict[str,float]=model.predict(seq=seq,models=pred_models,
+                        num_models=len(pred_models),num_recycles=3,return_aux=True)['log']
+                    for i in ['hard','soft','temp','seqid','recycles','models']:
+                        aux.pop(i,None)
+                    model_pdb_path=f'{m_dir}/{mpnn_id}.pdb'
+                    if os.path.exists(model_pdb_path):
+                        os.remove(model_pdb_path)
+                    model.save_current_pdb(model_pdb_path)
+                    binder_contacts = hotspot_residues(model_pdb_path)
+                    aux['n_contact'] = len(binder_contacts.items())
+                    aux['contacts']=binder_contacts
+                    aux['r_pdb']=model_pdb_path
+                    logs[mpnn_id]=aux
+                
+        self.mpnn_refold_log=logs
+        with open(m_dir+'/log.pkl','wb') as f:
+            pkl.dump(logs,f)
+        self.mpnn_refold_df=pd.DataFrame(self.mpnn_refold_log).T
+        self._rescue_empty_df(mpnn=True)
+        self.mpnn_refold_df.to_csv(m_dir+'/log.csv',index_label='Design')
+        return self.mpnn_refold_df
     
-    def merge_rescore_metrics(self,use_col=['rmsd','plddt','n_contact','i_pae']):
-        m_df:pd.DataFrame=self.rescore_df[use_col]
+    def merge_refold_metrics(self,use_col=['rmsd','plddt','n_contact','i_pae']):
+        m_df:pd.DataFrame=self.refold_df[use_col]
         m_df.columns=[f'r:{i}' for i in m_df]
         for c in m_df.columns:
             if c in self.Metrics.metrics.columns:
@@ -628,21 +783,25 @@ class ReScorer:
         self.Metrics.metrics=pd.merge(left=self.Metrics.metrics,right=m_df,left_index=True,right_index=True)
         return self.Metrics.metrics[m_df.columns]
 
-    def reload_rescore_log(self,rescore_dir:str='rescore',mpnn:bool=False):
-        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+rescore_dir
-        with open(r_dir+'/log.pkl','rb') as f:
-            rescore_log=pkl.load(f)
-        rescore_df=pd.DataFrame(self.rescore_log).T
+    def reload_refold_log(self,refold_dir:str='rescore',mpnn:bool=False)->None|pd.DataFrame:
+        r_dir=self.Metrics.outdir+f'/{self.Metrics._subdir}/'+refold_dir
+        if os.path.exists(r_dir+'/log.pkl'):
+            with open(r_dir+'/log.pkl','rb') as f:
+                refold_log=pkl.load(f)
+            refold_df=pd.DataFrame(refold_log).T
 
-        if mpnn:
-            self.m_dir=r_dir
-            self.mpnn_rescore_log=rescore_log
-            self.mpnn_rescore_df=rescore_df
+            if mpnn:
+                self.m_dir=r_dir
+                self.mpnn_refold_log=refold_log
+                self.mpnn_refold_df=refold_df
+            else:
+                self.r_dir=r_dir
+                self.refold_log=refold_log
+                self.refold_df=refold_df
+            self._rescue_empty_df(mpnn)
+            return refold_df
         else:
-            self.r_dir=r_dir
-            self.rescore_log=rescore_log
-            self.rescore_df=rescore_df
-        return rescore_df
+            return None
     
     @property
     def complex_prediction_model(self):
@@ -651,20 +810,27 @@ class ReScorer:
             protocol="binder", 
             num_recycles=3,
             data_dir='.',
-            **self.model_kwargs)
+            **self.model_params)
         return self._complex_prediction_model
     
     @property
-    def rescore_cols(self):
-        return self.rescore_df.columns.to_list()
-   
-def _graft_binder(trajectory_pdb:str,rescore_target:str,rescore_chain:str,outpdb:str):
+    def refold_cols(self):
+        return self.refold_df.columns.to_list()
+    
+    def _rescue_empty_df(self,mpnn:bool=False):
+        cols='Design,con,dgram_cce,exp_res,fape,i_con,i_pae,pae,plddt,rmsd,seq_ent,loss,i_ptm,ptm,n_contact,contacts,g_pdb,r_pdb'
+        attr='mpnn_refold_df' if mpnn else 'refold_df'
+        if len(getattr(self,attr,[]))==0:
+            df=pd.DataFrame(columns=cols.split(',')).set_index('Design')
+            setattr(self,attr,df)
+
+def _graft_binder(trajectory_pdb:str,refold_target:str,refold_chain:str,outpdb:str):
     '''
     make sure traj/rescore pdb are pre-aligned.
     '''
     cmd.load(trajectory_pdb,'trajpdb')
-    cmd.load(rescore_target,'rescorepdb')
-    cmd.select('to_write',f" ( trajpdb and chain B ) or (rescorepdb and (chain {rescore_chain}))")
+    cmd.load(refold_target,'rescorepdb')
+    cmd.select('to_write',f" ( trajpdb and chain B ) or (rescorepdb and (chain {refold_chain}))")
     cmd.save(outpdb,'to_write')
     cmd.delete('trajpdb')
     cmd.delete('rescorepdb')

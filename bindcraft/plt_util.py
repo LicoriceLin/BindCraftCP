@@ -90,3 +90,12 @@ def plot_protein_features(
         for i in ['left','right']: #'top','bottom',
             ax.spines[i].set_visible(False)
     return fig, axes
+
+def kde_scatter(df:pd.DataFrame,x:str,y:str,color='tab:blue',ax:plt.Axes|None=None):
+    if ax is None:
+        fig,ax=plt.subplots(1,1)
+    else:
+        fig=ax.get_figure()
+    sns.kdeplot(data=df, x=x,y=y,fill=True,alpha=0.4,color=color,ax=ax)
+    sns.scatterplot(data=df,x=x,y=y,ax=ax,color=color)
+    return fig,ax
