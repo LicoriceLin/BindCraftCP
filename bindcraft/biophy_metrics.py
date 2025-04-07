@@ -33,7 +33,7 @@
 # from collections.abc import Iterable as collections_Iterable
 # from Bio.Data import PDBData
 from ._import import *
-
+from .util import write_out,pdbfile2id
 import pdbfixer
 from openmm.app import PDBFile
 from propka.run import single
@@ -269,13 +269,13 @@ def ptm_propka(pdbfile:str,
     ptm_threshold:float=0.5,
     mut_recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe,
     sasa_threshold:float=0.,
-    MPOP1:bool=False):
+    ): #MPOP1:bool=False
     '''
     ptms: from `parse_musite_dir`
 
     '''
     # ptms=ptms.copy()
-    mut_recipe_={v[0]:v[1] for v in mut_recipe.keys()}
+    mut_recipe_={v[0]:v[1] for v in mut_recipe.values()}
     for k in ptms.keys():
         ptms[k]=(ptms[k][0],mut_recipe_.get(k,''))
     
@@ -290,10 +290,10 @@ def ptm_propka(pdbfile:str,
         for k,v in ptms.items():
             # no need to overwrite 
             if v[1]:
-                if MPOP1:
-                    des=peel_pdbfile(pdbfile)
-                else:
-                    des=Path(pdbfile).stem[:-7]
+                # if MPOP1:
+                #     des=peel_pdbfile(pdbfile)
+                # else:
+                des=pdbfile2id(pdbfile)
                 for l in v[0].get(des,[]):
                     t=l[2]>ptm_threshold and l[2]>=mutstrs.get(l[0],('',0.))[1]
                     if sasa_threshold>0:
@@ -318,6 +318,7 @@ def ptm_propka(pdbfile:str,
             pis=propka_single(f'{tmpdir}/{Path(pdbfile).stem}.pdb',optargs=[f'-c=A'])
         else:
             pis=propka_single(f'{tmpdir}/{Path(pdbfile).stem}.pdb',optargs=[f'-c=B'])
+        pis['mutstrs']=mutstrs
         return pis
     
 # %% ESM_IF Utils

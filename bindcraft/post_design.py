@@ -3,7 +3,8 @@ from typing import TYPE_CHECKING
 from ._import import *
 from .util import (id2pdbfile,outdir_from_metrics,
     read_bc_metrics,read_design_metrics,_meta_cols,_aa_col,
-    _simpliest_filter,show_filter,check_filters,filters_type
+    _simpliest_filter,show_filter,check_filters,filters_type,
+    pdbfile2id
     )
 
 from numpy.lib.stride_tricks import sliding_window_view
@@ -46,8 +47,11 @@ def _default_ptm_feat_recipe(ptm_track:Dict[str,str|np.ndarray]):
     o['Surf-MeR'] = ( (ptm_track['MeR']>0.5) & (ptm_track['surf'])).sum()
     return o
 
-_default_refold_model_params=dict(
+_templated_refold_model_params=dict(
     use_multimer=False, use_initial_guess=True, use_initial_atom_pos=True)
+_direct_refold_model_params=dict(
+    use_multimer=False,use_initial_guess=False, use_initial_atom_pos=False)
+
 class Metrics:
     def __init__(self,
         outdir:str,
@@ -151,7 +155,7 @@ class Metrics:
         musite_dir=self.ana_paths['musite_dir']
         with open(fasta,'w') as f:
             for pdb in self._pdbs:
-                f.write(f'>{Path(pdb).stem}\n')
+                f.write(f'>{pdbfile2id(pdb)}\n')
                 f.write(f'{pdb2seq(pdb)[0]}\n')
 
         musite_ckpt=f'{musite_dir}/MUSITE_DONE'
@@ -187,7 +191,8 @@ class Metrics:
         pkl.dump(pis,open(pis_file,'wb'))
 
     def cal_ptm_pi(self,ptm_threshold:float=0.5,sasa_threshold:float=0.4,
-        mut_recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe
+        mut_recipe:Dict[str,Tuple[str,str]]=musite_parse_recipe,force_regen:bool=False,
+        bk_suffix:str='bk'
         ):
         print('calculate PTM-modified PI')
         if getattr(self,'ptms',None) is None:
@@ -203,7 +208,11 @@ class Metrics:
 
         modi_pis_file=self.ana_paths['modi_pis_file']
         if os.path.exists(modi_pis_file):
-            modi_pis:Dict[str,Dict[str,float]]=pkl.load(open(modi_pis_file,'rb'))
+            if not force_regen:
+                modi_pis:Dict[str,Dict[str,float]]=pkl.load(open(modi_pis_file,'rb'))
+            else:
+                Path(modi_pis_file).rename(Path(modi_pis_file).with_stem(f'modi_pis_{bk_suffix}'))
+                modi_pis={}
         else:
             modi_pis={}
 
@@ -219,9 +228,10 @@ class Metrics:
     def cal_esm(self):
         print('run ESM-IF')
         esm_if_file=self.ana_paths['esm_if_file']
+        
         if not os.path.exists(esm_if_file):
             esm_if_o=run_esm_if(self._pdbs,'B')
-            esm_if_o={Path(k).stem:v for k,v in esm_if_o.items()}
+            esm_if_o={pdbfile2id(k):v for k,v in esm_if_o.items()}
             with open(esm_if_file,'wb') as f:
                 pkl.dump(esm_if_o,f)
         else:
@@ -230,7 +240,7 @@ class Metrics:
             if len(new_entry)>0:
                 new_pdbs=self.metrics.loc[new_entry]['pdbfile']
                 new_esm_if_o=run_esm_if(new_pdbs,'B')
-                esm_if_o.update({Path(k).stem:v for k,v in new_esm_if_o.items()})
+                esm_if_o.update({pdbfile2id(k):v for k,v in new_esm_if_o.items()})
                 with open(esm_if_file,'wb') as f:
                     pkl.dump(esm_if_o,f)
         
@@ -240,10 +250,12 @@ class Metrics:
         self.esm_if_o=esm_if_o
     
     def cal_lcr(self):
-         print('match Low Complexity Region')
-         for k,v in self.ana_tracks.items():
+        print('match Low Complexity Region')
+        lcr={}
+        for k,v in self.ana_tracks.items():
             v['LCR']=_match_pattern(v['seq'])
-            self.metrics['lcr']=int(v['LCR'].sum())
+            lcr[k]=int(v['LCR'].sum())
+        self.metrics['lcr']=lcr
     
     def cal_interact(self):
         print('annot Hydro-Bonds/Salt-Bridges')
@@ -296,7 +308,8 @@ class Metrics:
         if outdir is not None:
             if ckpt is not None:
                 print('`ckpt` are overloaded by `outdir`')
-            m=f'{outdir}/Trajectory/{_p}/Metrics.pkl'
+            _subdir='Trajectory' if mode=='design' else 'MPNN'
+            m=f'{outdir}/{_subdir}/{_p}/Metrics.pkl'
             ret=cls(outdir=outdir,mode=mode,post_stem=post_stem)
             with open(m, 'rb') as f:
                 ret.__dict__.update(pkl.load(f))
@@ -393,7 +406,7 @@ class Metrics:
     
     def _init_refold(self,
         cyclic:bool=False,
-        model_params:Dict[str,bool]=_default_refold_model_params,
+        model_params:Dict[str,bool]=_templated_refold_model_params,
         reload_refold_dir:str|None=None,
         reload_mpnn:bool=False):
         self._refolder=ReFolder(self,cyclic=cyclic,model_params=model_params)
@@ -419,7 +432,7 @@ class Metrics:
         refold_mode:Literal['none','direct','templated']='none',
         refold_target:str='',refold_chain:str='',
         refold_dir:str='rescore',graft_dir:str='graft',
-        model_params:Dict[str,bool]=_default_refold_model_params,
+        model_params:Dict[str,bool]=_templated_refold_model_params,
         filters:filters_type=_simpliest_filter,
         cyclic:bool=False,seed:int=42,pred_models=[0],
         ):
@@ -572,7 +585,7 @@ class ReFolder:
     def __init__(self,
         metrics:Metrics,
         cyclic:bool=False,
-        model_params:Dict[str,bool]=_default_refold_model_params):
+        model_params:Dict[str,bool]=_templated_refold_model_params):
         self.Metrics=metrics
         self.cyclic=cyclic
         self.model_params=model_params

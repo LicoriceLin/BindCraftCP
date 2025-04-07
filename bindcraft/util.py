@@ -29,6 +29,17 @@ def id2pdbfile(design_id:str,outdir:str,mode:Literal['relax','mpnn','design','si
     else:
         raise NotImplementedError
 
+def pdbfile2id(pdbfile:str): #,mode:Literal['relax','mpnn','design','single','design_relax']='relax'
+    id_=Path(pdbfile).stem
+    if '_model' in id_:
+        return id_.split('_model')[0]
+    else:
+        return id_
+    # if mode in ['relax','mpnn']:
+    #     return id_.split('_model')[0]
+    # else:
+    #     return id_
+
 outdir_from_metrics=lambda metrics:str(Path(metrics.iloc[0]['pdbfile']).parents[1])
 
 def _avg_InterfaceAAs(aa_dicts:List[Dict[str,int|float]]):
