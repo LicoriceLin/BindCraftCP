@@ -17,6 +17,9 @@ def init_task(
     '''
     creat file system, 
     init arg dict of `settings`, `advanced_settings_path`, `filter_settings_path`
+
+    if ~`load_previous_target_settings`:
+        create the system
     '''
     if load_previous_target_settings:
         target_settings_path = load_previous_target_settings

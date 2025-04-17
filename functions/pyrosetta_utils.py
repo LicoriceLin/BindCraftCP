@@ -3,6 +3,7 @@
 ####################################
 ### Import dependencies
 import os
+from pathlib import Path
 import pyrosetta as pr
 from pyrosetta.rosetta.core.kinematics import MoveMap
 from pyrosetta.rosetta.core.select.residue_selector import ChainSelector
@@ -13,12 +14,13 @@ from pyrosetta.rosetta.core.simple_metrics.metrics import RMSDMetric
 from pyrosetta.rosetta.core.select import get_residues_from_subset
 from pyrosetta.rosetta.core.io import pose_from_pose
 from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
-from .generic_utils import clean_pdb
+from .generic_utils import clean_pdb,backup_if_exists,backuppdb_if_multiframe
 from .biopython_utils import hotspot_residues
 from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 
 # Rosetta interface scores
 def score_interface(pdb_file, binder_chain="B",cyclize_peptide:bool=False):
+    backuppdb_if_multiframe(pdb_file)
     # load pose
     pose = pr.pose_from_pdb(pdb_file)
     if cyclize_peptide:
@@ -149,6 +151,7 @@ def score_interface(pdb_file, binder_chain="B",cyclize_peptide:bool=False):
 
 # align pdbs to have same orientation
 def align_pdbs(reference_pdb, align_pdb, reference_chain_id, align_chain_id):
+    backuppdb_if_multiframe(align_pdb)
     # initiate poses
     reference_pose = pr.pose_from_pdb(reference_pdb)
     align_pose = pr.pose_from_pdb(align_pdb)
@@ -174,6 +177,7 @@ def align_pdbs(reference_pdb, align_pdb, reference_chain_id, align_chain_id):
 
 # calculate the rmsd without alignment
 def unaligned_rmsd(reference_pdb, align_pdb, reference_chain_id, align_chain_id):
+    backuppdb_if_multiframe(align_pdb)
     reference_pose = pr.pose_from_pdb(reference_pdb)
     align_pose = pr.pose_from_pdb(align_pdb)
 
@@ -206,54 +210,55 @@ def unaligned_rmsd(reference_pdb, align_pdb, reference_chain_id, align_chain_id)
 
 # Relax designed structure
 def pr_relax(pdb_file:str, relaxed_pdb_path:str,cyclize_peptide:bool=False):
-    if not os.path.exists(relaxed_pdb_path):
-        # Generate pose
-        pose = pr.pose_from_pdb(pdb_file)
-        if cyclize_peptide:
-            b,e=len(pose.split_by_chain()[1])+1,len(pose)
-            mover=XmlObjects.static_get_mover(
-                f'''<PeptideCyclizeMover name="close" >
-                <Torsion res1="{e}" res2="{e}" res3="{b}" res4="{b}" atom1="CA" atom2="C" atom3="N" atom4="CA" cst_func="CIRCULARHARMONIC 3.141592654 0.005" />
-                <Angle res1="{e}" atom1="CA" res_center="{e}" atom_center="C" res2="{b}" atom2="N" cst_func="HARMONIC 2.01000000 0.01" />
-                <Angle res1="{e}" atom1="C" res_center="{b}" atom_center="N" res2="{b}" atom2="CA" cst_func="HARMONIC 2.14675498 0.01" />
-                <Distance res1="{e}" res2="{b}" atom1="C" atom2="N" cst_func="HARMONIC 1.32865 0.01" />
-                <Bond res1="{e}" res2="{b}" atom1="C" atom2="N" add_termini="true" />
-            </PeptideCyclizeMover>'''
-            )
-            mover.apply(pose)
-        start_pose = pose.clone()
+    backup_if_exists(relaxed_pdb_path)
+    backuppdb_if_multiframe(pdb_file)
+    # Generate pose
+    pose = pr.pose_from_pdb(pdb_file)
+    if cyclize_peptide:
+        b,e=len(pose.split_by_chain()[1])+1,len(pose)
+        mover=XmlObjects.static_get_mover(
+            f'''<PeptideCyclizeMover name="close" >
+            <Torsion res1="{e}" res2="{e}" res3="{b}" res4="{b}" atom1="CA" atom2="C" atom3="N" atom4="CA" cst_func="CIRCULARHARMONIC 3.141592654 0.005" />
+            <Angle res1="{e}" atom1="CA" res_center="{e}" atom_center="C" res2="{b}" atom2="N" cst_func="HARMONIC 2.01000000 0.01" />
+            <Angle res1="{e}" atom1="C" res_center="{b}" atom_center="N" res2="{b}" atom2="CA" cst_func="HARMONIC 2.14675498 0.01" />
+            <Distance res1="{e}" res2="{b}" atom1="C" atom2="N" cst_func="HARMONIC 1.32865 0.01" />
+            <Bond res1="{e}" res2="{b}" atom1="C" atom2="N" add_termini="true" />
+        </PeptideCyclizeMover>'''
+        )
+        mover.apply(pose)
+    start_pose = pose.clone()
 
-        ### Generate movemaps
-        mmf = MoveMap()
-        mmf.set_chi(True) # enable sidechain movement
-        mmf.set_bb(True) # enable backbone movement, can be disabled to increase speed by 30% but makes metrics look worse on average
-        mmf.set_jump(False) # disable whole chain movement
+    ### Generate movemaps
+    mmf = MoveMap()
+    mmf.set_chi(True) # enable sidechain movement
+    mmf.set_bb(True) # enable backbone movement, can be disabled to increase speed by 30% but makes metrics look worse on average
+    mmf.set_jump(False) # disable whole chain movement
 
-        # Run FastRelax
-        fastrelax = FastRelax()
-        scorefxn = pr.get_fa_scorefxn()
-        fastrelax.set_scorefxn(scorefxn)
-        fastrelax.set_movemap(mmf) # set MoveMap
-        fastrelax.max_iter(200) # default iterations is 2500
-        fastrelax.min_type("lbfgs_armijo_nonmonotone")
-        fastrelax.constrain_relax_to_start_coords(True)
-        fastrelax.apply(pose)
+    # Run FastRelax
+    fastrelax = FastRelax()
+    scorefxn = pr.get_fa_scorefxn()
+    fastrelax.set_scorefxn(scorefxn)
+    fastrelax.set_movemap(mmf) # set MoveMap
+    fastrelax.max_iter(200) # default iterations is 2500
+    fastrelax.min_type("lbfgs_armijo_nonmonotone")
+    fastrelax.constrain_relax_to_start_coords(True)
+    fastrelax.apply(pose)
 
-        # Align relaxed structure to original trajectory
-        align = AlignChainMover()
-        align.source_chain(0)
-        align.target_chain(0)
-        align.pose(start_pose)
-        align.apply(pose)
+    # Align relaxed structure to original trajectory
+    align = AlignChainMover()
+    align.source_chain(0)
+    align.target_chain(0)
+    align.pose(start_pose)
+    align.apply(pose)
 
-        # Copy B factors from start_pose to pose
-        for resid in range(1, pose.total_residue() + 1):
-            if pose.residue(resid).is_protein():
-                # Get the B factor of the first heavy atom in the residue
-                bfactor = start_pose.pdb_info().bfactor(resid, 1)
-                for atom_id in range(1, pose.residue(resid).natoms() + 1):
-                    pose.pdb_info().bfactor(resid, atom_id, bfactor)
+    # Copy B factors from start_pose to pose
+    for resid in range(1, pose.total_residue() + 1):
+        if pose.residue(resid).is_protein():
+            # Get the B factor of the first heavy atom in the residue
+            bfactor = start_pose.pdb_info().bfactor(resid, 1)
+            for atom_id in range(1, pose.residue(resid).natoms() + 1):
+                pose.pdb_info().bfactor(resid, atom_id, bfactor)
 
-        # output relaxed and aligned PDB
-        pose.dump_pdb(relaxed_pdb_path)
-        clean_pdb(relaxed_pdb_path)
+    # output relaxed and aligned PDB
+    pose.dump_pdb(relaxed_pdb_path)
+    clean_pdb(relaxed_pdb_path)

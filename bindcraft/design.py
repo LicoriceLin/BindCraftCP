@@ -31,7 +31,12 @@ class Design:
         filter_settings_path='settings_filters/no_filters.json',
         overwrite_outdir:bool=False,
         ):
-        self.outdir=outdir
+        '''
+        if `outdir` exists and ~`base_advanced_settings_path`:
+            load outdir/"advanced_settings.json" instead
+        
+        '''
+        self._outdir=outdir
         self.starting_pdb=starting_pdb
         self.chains=chains
         self.target_hotspot_residues=target_hotspot_residues
@@ -55,8 +60,13 @@ class Design:
                     self.load_previous_target_settings=''
         else:
             self.load_previous_target_settings=''
-        self._p=_p
-        self.base_advanced_settings_path=base_advanced_settings_path
+        self.outdir=_p
+        if base_advanced_settings_path:
+            self.base_advanced_settings_path=base_advanced_settings_path
+        else:
+            _b=_p/'advanced_settings.json'
+            assert _b.exists()
+            self.base_advanced_settings_path=str(_b)
         self.filter_settings_path=filter_settings_path
         self.advanced_settings_overload=advanced_settings_overload
         self.overwrite_outdir=overwrite_outdir
@@ -70,7 +80,7 @@ class Design:
             load_previous_target_settings=self.load_previous_target_settings,
             advanced_settings_path=self.base_advanced_settings_path,
             filter_settings_path=self.filter_settings_path,
-            design_path=self.outdir,
+            design_path=self._outdir,
             binder_name=self.binder_name,
             starting_pdb=self.starting_pdb,
             chains=self.chains,
@@ -79,7 +89,7 @@ class Design:
             )
             self.advanced_settings.update(self.advanced_settings_overload)
 
-            with open(self._p/'advanced_settings.json','w') as f:
+            with open(self.outdir/'advanced_settings.json','w') as f:
                 json.dump(self.advanced_settings,f)      
             if not self.advanced_settings['omit_AAs']:
                 self.advanced_settings['omit_AAs']=None
@@ -91,15 +101,15 @@ class Design:
         seeds,lengths,helicity_values=list(seeds),list(lengths),list(helicity_values)
         lengths.sort()
         self.trajectory_metrics=[]
-        if os.path.exists(self._p/'trajectory_stats.csv'):
-            _=pd.read_csv(self._p/'trajectory_stats.csv')
+        if os.path.exists(self.outdir/'trajectory_stats.csv'):
+            _=pd.read_csv(self.outdir/'trajectory_stats.csv')
             if len(_)>0:
                 finished=_['Design'].to_list()
             else:
                 finished=[]
         else:
             finished=[]
-        skipped=self._p/'Trajectory/LowConfidence'
+        skipped=self.outdir/'Trajectory/LowConfidence'
         if os.path.exists(skipped):
             finished.extend([i.stem for i in skipped.iterdir()])
         

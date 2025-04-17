@@ -16,7 +16,7 @@ from colabdesign.af.loss import get_ptm, mask_loss, get_dgram_bins, _get_con_los
 from colabdesign.shared.utils import copy_dict
 from .biopython_utils import hotspot_residues, calculate_clash_score, calc_ss_percentage, calculate_percentages,target_pdb_rmsd
 from .pyrosetta_utils import pr_relax, align_pdbs,unaligned_rmsd,score_interface
-from .generic_utils import update_failures,BasicDict
+from .generic_utils import update_failures,BasicDict,backup_if_exists,backuppdb_if_multiframe
 
 def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
   '''add cyclic offset to connect N and C term'''
@@ -225,7 +225,8 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
             af_model._design_mcmc(
                 steps=mcmc_inner_iter,seq_logits=seq_logits,
                 half_life=half_life, T_init=t_mcmc, mutation_rate=greedy_tries, 
-                num_models=1, models=design_models,sample_models=advanced_settings["sample_models"], 
+                num_models=advanced_settings.get('mcmc_num_models',1), 
+                models=design_models,sample_models=advanced_settings["sample_models"], 
                 save_best=True)
             af_model._tmp['outputs'].append(af_model._tmp["best"])
             # af_model._k-=mcmc_inner_iter
@@ -343,7 +344,9 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
     ### save trajectory PDB
     # final_plddt = get_best_plddt(af_model, length)
     final_plddt=np.mean(af_model.aux["plddt"][-length:])
+    backup_if_exists(model_pdb_path)
     af_model.save_pdb(model_pdb_path)
+    backuppdb_if_multiframe(model_pdb_path)
     af_model.aux["log"]["terminate"] = ""
 
     # let's check whether the trajectory is worth optimising by checking confidence, clashes, and contacts

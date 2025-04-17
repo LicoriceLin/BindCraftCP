@@ -1,4 +1,7 @@
 from ._import import *
+from typing import  Sequence
+from seaborn.palettes import _ColorPalette
+
 xkcd_color=lambda x:mcolors.to_rgb(mcolors.XKCD_COLORS[f'xkcd:{x}'])
 def configure_rcParams():
     c_rcParams=plt.rcParamsDefault
@@ -104,3 +107,43 @@ def joint_kde_scatter(df:pd.DataFrame,x:str,y:str,hue:str|None=None,color='tab:b
     g = sns.jointplot(data=df, x=x, y=y,hue=hue,color=color)
     g.plot_joint(sns.kdeplot, color=color, hue=hue,fill=True,alpha=0.4)
     return g
+
+def sort_categories(df:pd.DataFrame,col:str,orders:List[str]):
+    '''
+    order label cols
+    for sns plots.
+    '''
+    dt = CategoricalDtype(categories=orders, ordered=True)
+    df[col] = df[col].astype(dt)
+    return df
+
+def strip_box(data:pd.DataFrame,x:str,y:str,ax:plt.Axes,hue:str|None=None,
+    order:Sequence[str]|None=None,hue_order:Sequence[str]|None=None,
+    palette:_ColorPalette|None=None
+    ):
+    sns.boxplot(data,y=y,x=x,hue=hue, fliersize=0,boxprops={'alpha': 0.4},order=order,ax=ax,palette=palette)
+    sns.stripplot(data,y=y,x=x,ax=ax,hue=hue,order=order,dodge=True,palette=palette)
+    if hue!=None:
+        handles, labels = ax.get_legend_handles_labels()
+        r_=len(data[hue].unique())
+        ax.legend(handles=[(handles[i], handles[i+r_]) for i in range(r_)],
+            labels=hue_order)
+    return ax
+
+def add_annot(pairs:List[Any],data:pd.DataFrame,x:str,y:str,ax:plt.Axes,hue:str|None=None,
+    order:Sequence[str]|None=None,hue_order:Sequence[str]|None=None):
+    annotator = Annotator(ax, pairs,hue=hue,data=data, x=x, y=y, order=order,hue_order=hue_order,plot='boxplot')
+    annotator.configure(test='Mann-Whitney', text_format='star', loc='inside')
+    annotator.apply_and_annotate()
+    return ax
+
+def add_filter_bar(ax:plt.Axes,filter_dict:Dict[str,bool|float|int|None]):
+    c='tab:red' if filter_dict['higher'] else 'green'
+    y_thresh=filter_dict['threshold']
+    xmin,xmax=ax.get_xlim()
+    ymin,ymax=ax.get_ylim()
+    arrow_x=(xmin+xmax)/2
+    dy=(ymax-ymin)*0.05 if filter_dict['higher'] else -(ymax-ymin)*0.05
+    ax.hlines(y_thresh,xmin,xmax,colors=c,linestyles='--')
+    ax.arrow(arrow_x,y_thresh,0,dy,color=c,head_width=0.05,head_length=abs(dy*0.5),length_includes_head=True)
+    return ax

@@ -9,7 +9,7 @@ from .util import (id2pdbfile,outdir_from_metrics,
 
 from numpy.lib.stride_tricks import sliding_window_view
 from colabdesign import clear_mem
-from functions import hotspot_residues,mk_afdesign_model,add_cyclic_offset
+from functions import hotspot_residues,mk_afdesign_model,add_cyclic_offset,backup_if_exists
 
 from .biophy_metrics import (
     run_musite,parse_musite_dir,run_esm_if,gen_ana_tracks,
@@ -48,9 +48,9 @@ def _default_ptm_feat_recipe(ptm_track:Dict[str,str|np.ndarray]):
     return o
 
 _templated_refold_model_params=dict(
-    use_multimer=False, use_initial_guess=True, use_initial_atom_pos=True)
+    use_multimer=False, use_initial_guess=True, use_initial_atom_pos=True,rm_target_sc=False)
 _direct_refold_model_params=dict(
-    use_multimer=False,use_initial_guess=False, use_initial_atom_pos=False)
+    use_multimer=False,use_initial_guess=False, use_initial_atom_pos=False,rm_target_sc=False)
 
 class Metrics:
     def __init__(self,
@@ -77,7 +77,9 @@ class Metrics:
                     post_dir=f'{outdir}/{_s}/{_p}/',
                 )
         elif mode=='mpnn': # TODO change to `rescore`
-            self.metrics:pd.DataFrame=read_bc_metrics(outdir)
+            self.metrics:pd.DataFrame=read_bc_metrics(outdir,use_rmsd=True)
+            self._raw_metrics=pd.read_csv(f'{outdir}/final_design_stats.csv'
+                ).drop_duplicates(subset=['Design'], keep='last')
             os.makedirs(f'{outdir}/MPNN/{_p}',exist_ok=True)
             _s=self._subdir='MPNN'
             self.ana_paths=dict(
@@ -97,6 +99,12 @@ class Metrics:
         else:
             raise NotImplementedError
         
+    def _load_partial_mpnn_metrics(self,model_ids:None|List[int]=None):
+        assert self.mode=='mpnn'
+        bc_metrics=read_bc_metrics(outdir=self.outdir,model_ids=model_ids,df=self._raw_metrics,use_rmsd=True)
+        self.metrics[bc_metrics.columns]=bc_metrics
+        self._current_metrics_model_ids=model_ids
+
     def post_process(self,process_recipe:Literal['miniprot_full','minimal']='minimal'):
         if process_recipe=='miniprot_full':
             self.cal_ptm()
@@ -269,7 +277,7 @@ class Metrics:
             if design_id in inters:
                 (ppi_interacts,b_inter_res)=inters[design_id]
             else:
-                pdbfile=s['pdbfile'].replace('Trajectory/','Trajectory/Relaxed/')
+                pdbfile=self._relaxed_pdbs[design_id] #s['pdbfile'].replace('Trajectory/','Trajectory/Relaxed/')
                 inter_res=s['InterfaceResidues']
                 (ppi_interacts,b_inter_res)=cal_ppi_interacts(pdbfile,inter_res)
                 inters[design_id]=(ppi_interacts,b_inter_res)
@@ -298,6 +306,7 @@ class Metrics:
         if ckpt is None:
             ckpt=self.ana_paths['Metrics']
         d={k:v for k,v in self.__dict__.items() if (not k.startswith('_')) and (k not in saved_internal)}
+        backup_if_exists(ckpt)
         with open(ckpt, 'wb') as f:
             pkl.dump(d, f)
 
@@ -439,6 +448,7 @@ class Metrics:
         '''
         self._refolder should be initialized here.
         Note: it could reload `log.pkl` from `refold_dir` and only run new entries.
+        re-run safe. auto-load scored entries.
         '''
         self.refold_mode=refold_mode
         if refold_mode!='none':
@@ -449,7 +459,8 @@ class Metrics:
             refold_args=dict(refold_target=refold_target,
                 refold_chain=refold_chain,
                 refold_dir=refold_dir,
-                seed=seed,pred_models=pred_models)
+                seed=seed,pred_models=pred_models,
+                )
             # self.
             self.r_subdir=refold_dir
             if refold_mode=='direct':
@@ -461,6 +472,10 @@ class Metrics:
             else:
                 raise ValueError
             self.refold_args=refold_args
+            self.refold_args['refolder_init_args']=dict(
+                    model_params=model_params,
+                    cyclic=cyclic,
+                    reload_refold_dir=refold_dir)
             self.refold_df=self._refolder.refold_df
             use_col=[k.replace('r:','') for k in filters.keys() if k.startswith('r:')]
             refolder.merge_refold_metrics(use_col=use_col)
@@ -496,6 +511,10 @@ class Metrics:
         mpnn_df=mpnn_sampler.mpnn_df
         refold_mode:str=getattr(self,'refold_mode','none')
         if refold_mode != 'none':
+            # if hasattr(self,'_refolder'):
+            #     refolder=self._refolder
+            # elif hasattr(self,'refold_args'):
+            #     self._refolder=
             assert hasattr(self,'_refolder'), 'run filter first!'
             refolder=self._refolder
             self.m_subdir=mpnn_refold_dir
@@ -620,7 +639,7 @@ class ReFolder:
                             chain=refold_chain, 
                             binder_len=l, 
                             rm_target_seq=False,
-                            rm_target_sc=False,
+                            rm_target_sc=self.rm_target_sc,
                             seed=seed)
                     if self.cyclic:
                         add_cyclic_offset(model, offset_type=2)
@@ -676,7 +695,7 @@ class ReFolder:
                     pdb_filename=g_pdb, 
                     chain=refold_chain, binder_chain='B', binder_len=len(seq), 
                     use_binder_template=True, rm_target_seq=False,
-                    rm_target_sc=False, rm_template_ic=True,seed=seed)
+                    rm_target_sc=self.rm_target_sc, rm_template_ic=True,seed=seed)
                 if self.cyclic:
                     add_cyclic_offset(model, offset_type=2)
                 aux:Dict[str,float]=model.predict(seq=seq,models=pred_models,
@@ -721,7 +740,7 @@ class ReFolder:
                             chain=self.refold_chain, 
                             binder_len=l, 
                             rm_target_seq=False,
-                            rm_target_sc=False,
+                            rm_target_sc=self.rm_target_sc,
                             seed=seed)
                     if self.cyclic:
                         add_cyclic_offset(model, offset_type=2)
@@ -760,7 +779,7 @@ class ReFolder:
                 pdb_filename=self.refold_df['r_pdb'][design_id], 
                 chain='A', binder_chain='B', binder_len=len(sub_df['seq'].iloc[0]), 
                 use_binder_template=True, rm_target_seq=False,
-                rm_target_sc=False, rm_template_ic=True,seed=seed)
+                rm_target_sc=self.rm_target_sc, rm_template_ic=True,seed=seed)
             if self.cyclic:
                 add_cyclic_offset(model, offset_type=2)
             for mpnn_id,seq in sub_df['seq'].items():
@@ -819,6 +838,7 @@ class ReFolder:
     @property
     def complex_prediction_model(self):
         if getattr(self,'_complex_prediction_model',None) is None:
+            self.rm_target_sc=self.model_params.pop('rm_target_sc',False)
             self._complex_prediction_model = mk_afdesign_model(
             protocol="binder", 
             num_recycles=3,

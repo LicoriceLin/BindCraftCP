@@ -1,5 +1,5 @@
 from ._import import *
-
+from functools import reduce
 #%% pdb
 def write_out(strcture:Entity,file:str='tmp.pdb',write_end:bool=True, preserve_atom_numbering:bool=False)->None:
     '''
@@ -32,7 +32,11 @@ def id2pdbfile(design_id:str,outdir:str,mode:Literal['relax','mpnn','design','si
 def pdbfile2id(pdbfile:str): #,mode:Literal['relax','mpnn','design','single','design_relax']='relax'
     id_=Path(pdbfile).stem
     if '_model' in id_:
-        return id_.split('_model')[0]
+        ids=id_.split('_model')
+        if len(ids)==2:
+            return ids[0]
+        else:
+            return '_model'.join(ids[:-1])
     else:
         return id_
     # if mode in ['relax','mpnn']:
@@ -61,27 +65,43 @@ _metrics_col=['pLDDT','pTM','i_pTM','pAE','i_pAE','i_pLDDT','ss_pLDDT',
                 'Interface_Helix%','Interface_BetaSheet%','Interface_Loop%',
                 'Binder_Helix%','Binder_BetaSheet%','Binder_Loop%',
                 'Binder_pLDDT','Binder_pTM','Binder_pAE']
+_rmsd_col=['Hotspot_RMSD', 'Target_RMSD', 'Binder_RMSD']
 _aa_col='InterfaceAAs'
 
-def read_bc_metrics(outdir:str,first_two_only:bool=False):
+def read_bc_metrics(outdir:str|None=None,model_ids:None|List[int]=None,df:pd.DataFrame|None=None,use_rmsd:bool=False):
     '''
     read `final_design_stats`
     fixed rules: `Design` should always be the index col. 
     '''
-    final_score_df=pd.read_csv(f'{outdir}/final_design_stats.csv'
-        ).drop_duplicates(subset=['Design'], keep='last')
-    if not first_two_only:
-        used_cols=_meta_cols+[f'Average_{i}' for i in _metrics_col+[_aa_col]]
+    if use_rmsd:
+        metrics_col:List[str]=_metrics_col.copy()+_rmsd_col
+    else:
+        metrics_col=_metrics_col
+    if df is None:
+        final_score_df=pd.read_csv(f'{outdir}/final_design_stats.csv'
+            ).drop_duplicates(subset=['Design'], keep='last')
+    else:
+        final_score_df=df
+    final_score_df['Target_Hotspot'].fillna('',inplace=True)
+    final_score_df['InterfaceResidues'].fillna('',inplace=True)
+    if model_ids is None:
+        used_cols=_meta_cols+[f'Average_{i}' for i in metrics_col+[_aa_col]]
         bc_metrics=final_score_df[used_cols].copy()
         bc_metrics.columns=[i.replace('Average_','') for i in bc_metrics.columns]
         bc_metrics[f'{_aa_col}']=bc_metrics[f'{_aa_col}'].apply(lambda x:literal_eval(x))
     else:
-        aa_col_=[f'{i}_{_aa_col}' for i in [1,2]]
-        arr_1=final_score_df[[f'1_{i}' for i in _metrics_col]].to_numpy()
-        arr_2=final_score_df[[f'2_{i}' for i in _metrics_col]].to_numpy()
-        arr_avg=(arr_1+arr_2)/2
-        df_avg=pd.DataFrame(arr_avg,columns=[f'{i}' for i in _metrics_col])
+        arrs=[]
+        for model_id in model_ids:
+            arrs.append(final_score_df[[f'{model_id}_{i}' for i in metrics_col]].to_numpy())
+        # arr_2=final_score_df[[f'2_{i}' for i in _metrics_col]].to_numpy()
+        # arr_avg=(arr_1+arr_2)/2
+        if len(arrs)>1:
+            arr_avg:np.ndarray=reduce(lambda a,b:a+b,arrs)/len(arrs)
+        else:
+            arr_avg=arrs[0]
+        df_avg=pd.DataFrame(arr_avg,columns=[f'{i}' for i in metrics_col])
         
+        aa_col_=[f'{i}_{_aa_col}' for i in model_ids]
         df_aas=final_score_df[aa_col_]
         df_avg[f'{_aa_col}']=df_aas.apply(lambda s:_avg_InterfaceAAs([literal_eval(s[i]) 
                         for i in aa_col_]),axis=1)
@@ -191,7 +211,7 @@ def _check_filters(entry:pd.Series, filters:dict=_default_filters):
             expected_res:List[str]= conditions.split(",")
             res:List[str]= entry.get(label).split(",")
             for r in expected_res:
-                if res not in expected_res:
+                if r not in res:
                     unmet_conditions.append(label)
                     break
                
@@ -253,3 +273,7 @@ def is_pickleable(obj) -> bool:
         return True
     except Exception:
         return False
+    
+def timelog_to_minute(timelog:str):
+    t_=[int(i.split(' ')[0]) for i in  timelog.split(', ')]
+    return t_[0]*60+t_[1]+t_[2]/60

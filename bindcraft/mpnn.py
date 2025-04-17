@@ -9,6 +9,8 @@ from colabdesign.mpnn import mk_mpnn_model
 if TYPE_CHECKING:
     from .post_design import Metrics
 
+from .diversity_util import simple_diversity,cluster_and_get_medoids
+
 # %% MPNN biased generation
 
 aa_order = residue_constants.restype_order
@@ -140,37 +142,39 @@ def dedup_mpnn_results(mpnn_sequences,length:int,design_id:str):
     mpnn_df.index=[f'{design_id}-m{i+1}' for i in range(len(mpnn_df))]
     return mpnn_df
 
-def identity(x:str,y:str):
-    m=0
-    for i,j in zip(x,y):
-        if i==j:
-            m+=1
-    return m/len(x)
+# def identity(x:str,y:str):
+#     m=0
+#     for i,j in zip(x,y):
+#         if i==j:
+#             m+=1
+#     return m/len(x)
     
-def run_diversity(df:pd.DataFrame):
-    # subdf=subdf[subdf['plddt']>80]
-    odf=pd.DataFrame(columns=df.index,index=df.index)
-    for i, j in combinations(df['seq'].index, 2):
-        odf.at[i, j] = odf.at[j, i] = 1/(identity(df['seq'][i], df['seq'][j])+ 1e-3)
-    odf=odf.fillna(1.)
-    return odf
+# def run_diversity(df:pd.DataFrame):
+#     '''
+#     same-length simple diversity
+#     '''
+#     odf=pd.DataFrame(columns=df.index,index=df.index)
+#     for i, j in combinations(df['seq'].index, 2):
+#         odf.at[i, j] = odf.at[j, i] = 1/(identity(df['seq'][i], df['seq'][j])+ 1e-3)
+#     odf=odf.fillna(1.)
+#     return odf
 
-def cluster_and_get_medoids(distance_matrix, num_clusters=5):
-    spectral = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', random_state=42)
-    labels = spectral.fit_predict(distance_matrix)
+# def cluster_and_get_medoids(distance_matrix, num_clusters=5):
+#     spectral = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', random_state=42)
+#     labels = spectral.fit_predict(distance_matrix)
 
-    medoids = []
-    for cluster_id in range(num_clusters):
-        cluster_points = np.where(labels == cluster_id)[0]  
-        # if len(cluster_points) == 0:
-        #     continue  
+#     medoids = []
+#     for cluster_id in range(num_clusters):
+#         cluster_points = np.where(labels == cluster_id)[0]  
+#         # if len(cluster_points) == 0:
+#         #     continue  
 
-        # cluster_distances = distance_matrix[np.ix_(cluster_points, cluster_points)]
+#         # cluster_distances = distance_matrix[np.ix_(cluster_points, cluster_points)]
         
-        # medoid_index = cluster_points[np.argmin(cluster_distances.sum(axis=1))]
-        medoids.append(cluster_points[0])
+#         # medoid_index = cluster_points[np.argmin(cluster_distances.sum(axis=1))]
+#         medoids.append(cluster_points[0])
 
-    return medoids, labels
+#     return medoids, labels
 
 # %% Run MPNN
 def run_mpnn(
@@ -224,7 +228,7 @@ def run_mpnn(
 
         mpnn_sequences = mpnn_model.sample(temperature=0.1, num=num_sample, batch=num_sample)
         mpnn_df=dedup_mpnn_results(mpnn_sequences,length,design_id)
-        dis_df=run_diversity(mpnn_df)
+        dis_df=simple_diversity(mpnn_df)
         if len(dis_df)>max_mpnn_sequences:
             medoids, labels=cluster_and_get_medoids(dis_df.to_numpy(),max_mpnn_sequences)
             mpnn_df_=mpnn_df.iloc[medoids].copy()

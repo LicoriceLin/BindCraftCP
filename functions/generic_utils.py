@@ -11,6 +11,8 @@ import random
 import math
 import pandas as pd
 import numpy as np
+from pathlib import Path
+from Bio.PDB import PDBParser,PDBIO
 from typing import List,Tuple,Dict
 BasicDict=Dict[str,str|bool|int|float]
 # Define labels for dataframes
@@ -412,3 +414,43 @@ def check_filters(mpnn_data, design_labels, filters):
     # if some filters were unmet, print them out
     else:
         return unmet_conditions
+    
+def backup_if_exists(file_path:str,max_bk:int=10000,suff:str='-bk')->None:
+    """
+    If file_path exists, rename it to file_path{suff} (or {suff}1, {suff}2, ... if needed).
+    Returns the new backup file name or None if file does not exist.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return None
+
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+
+    for i in range(0,max_bk):  # arbitrary upper limit to avoid infinite loop
+        bk_suffix = f"{suff}{i}" if i > 0 else suff
+        new_name = parent / f"{stem}{bk_suffix}{suffix}"
+        if not new_name.exists():
+            path.rename(new_name)
+            return None
+    raise RuntimeError("Too many backup files exist. Aborting.")
+
+def backuppdb_if_multiframe(pdbpath:str,keep_model:int=1,suff:str='-multi')->None:
+    '''
+    if `pdbpath` has multiple frames:
+        back up pdbpath;
+        write `keep_model`(idx+1) to original path
+    else: pass
+    '''
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("complex", pdbpath)
+    models=list(structure.get_models())
+    if len(models)<=1:
+        return None
+    assert len(models)>keep_model
+    backup_if_exists(pdbpath,suff=suff)
+    io = PDBIO()
+    io.set_structure(models[keep_model-1])
+    io.save(pdbpath,write_end=True,preserve_atom_numbering=True)
+    

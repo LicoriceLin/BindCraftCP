@@ -5,106 +5,186 @@ from .bc_util import init_task
 
 from .util import _RFD_benchmark_filters as _default_mpnn_filter
 from .util import filters_type,check_filters
+# from functions import hotspot_residues,mk_afdesign_model,add_cyclic_offset
+
+'''
+    Prefilter (maintained in Metrics Core)
+    --- ---
+    None:
+        load_metrics `Post` & filter 
+    Direct:
+        pdbfile, rescore_chains: `rescore/log.csv`
+    Templated:
+        grafted & rescore on full structures & filter: `rescore/log.csv`
+    --- ---
+
+    MPNN_Sampler
+    --- ---
+    MPNN modes: See .mpnn.MPNNSampler: `Post/MPNN.csv`
+    None:
+        No extra Steps, mpnn_df['filt']=='All_Good' 
+    Direct:
+        Direct refold & filter: `mpnn_rescore/log.csv`
+    Templated:
+        Refold with template from `rescore/{design_id}.pdb` & filter: `mpnn_rescore/log.csv`
+    --- ---
+
+    Validator (Full Rescorer)
+    --- ---
+    init from Metrics. take local target_settings / advanced_settings.
+
+    None/Direct:
+    read-in Post/MPNN.csv, choose 'All_Good', take target pdbs/chains, refold
+    Templated:
+    read-in Post/MPNN.csv, choose 'All_Good', refold with template from `rescore/{design_id}.pdb` 
+    TODO load refold results directly, no need to fold the same thing twice.
+    --- ---
+    
+    TODO:
+    a design_env class,
+    maintain Designer, Augmentor(sub-class of Metrics, with filter/rescorer/mpnn_sampler), Scorer, Collector (sub-class of Metrics)
+
+    TODO:
+    Highlight in Lab Meeting:
+    1.CycPep Designs;
+    2.Surf-Only Design for Hard-Target/Accelerations: Preliminary Positive results;
+    3.Retro-Spective Ana for old metrics (RFD-Cyc; MPOP1); 
+    4.New Metrics: PI/PTM/Stability/Interactions;
+    5.Smarter biased MPNN;
+    6.Automation of my pipelines.
+'''
 
 class Score:
     '''
-    Step 2 of original BindCraft. Note: Selection of Backbones / 
-    Take MPNN.
-    Sample Hallucination Trajectories, Genearate Backbones Candidates.
+    Step 2 of original BindCraft. 
+    Direct read `MPNN.df` & Run bindcraft_score.
+    `filt` in `MPNN.df`: only run 'All_Good'
+    `design_id` in `MPNN.df` & `templated_refold`: refold with traj as template.
+    Note: if `templated_refold` & ~`self.multimer_validation`, only models #0 & #1 would be available. 
     '''
     def __init__(self,
         outdir:str,
         binder_name:str,
-        post_ana_dir='Post',
-        mode:Literal['direct','grafted']='grafted',
-        mpnn_rescore_path:str='mpnn_rescore',
-        rescore_path:str='rescore',
-        filters:filters_type=_default_mpnn_filter
+        # used for rescore from mpnn results
+        post_stem='Post',
+        mpnn_stem:str='MPNN',
+        # used for rescore anything
+        rescore_csv:str='',
+        target_settings_args={
+            'starting_pdb':'',
+            'chains':'',
+            'target_hotspot_residues':''
+            },
+        # templated_refold are only available for "rescore from mpnn results"
+        templated_refold:bool=False,
+        graft_stem:str='graft', # for refold templates 
+        # no need for "rescore from mpnn results". overided by outdir/'advanced_settings.json'
+        default_advanced_settings_path:str='settings_advanced/mcmcsampling_multimer_cyc.json', 
+        filters:filters_type|None=None, #None: use 'filt' col in mpnn df or skip filter. 
+        advanced_settings_overload:Dict[str,Any]={}, # will always override config in jsons.
+        
         ):
         '''
-        Prefilter (maintained in Metrics Core)
-        --- ---
-        None:
-            load_metrics `Post` & filter 
-        Direct:
-            pdbfile, rescore_chains: `rescore/log.csv`
-        Templated:
-            grafted & rescore on full structures & filter: `rescore/log.csv`
-        --- ---
+        `binder_name`:
+            used to fetch `target_settings_file`
+                as `load_previous_target_settings` in `init_task`
+            for fresh start rescores, please use `target_settings_args`
 
-        MPNN_Sampler
-        --- ---
-        MPNN modes: See .mpnn.MPNNSampler: `Post/MPNN.csv`
-        None:
-            No extra Steps, mpnn_df['filt']=='All_Good' 
-        Direct:
-            Direct refold & filter: `mpnn_rescore/log.csv`
-        Templated:
-            Refold with template from `rescore/{design_id}.pdb` & filter: `mpnn_rescore/log.csv`
-        --- ---
-
-        Validator (Full Rescorer)
-        --- ---
-        init from Metrics. take local target_settings / advanced_settings.
-
-        None/Direct:
-        read-in Post/MPNN.csv, choose 'All_Good', take target pdbs/chains, refold
-        Templated:
-        read-in Post/MPNN.csv, choose 'All_Good', refold with template from `rescore/{design_id}.pdb` 
-        TODO load refold results directly, no need to fold the same thing twice.
-        --- ---
+        `post_stem`
+        target_settings_args:
+            for fresh created ourdirs (e.g. score designs from other methods.)
+            used to create the `target_settings`
+            overided by self.outdir/f'{binder_name}.json'
         
-        TODO:
-        a design_env class,
-        maintain Designer, Augmentor(sub-class of Metrics, with filter/rescorer/mpnn_sampler), Scorer, Collector (sub-class of Metrics)
-
-        TODO:
-        Highlight in Lab Meeting:
-        1.CycPep Designs;
-        2.Surf-Only Design for Hard-Target/Accelerations: Preliminary Positive results;
-        3.Retro-Spective Ana for old metrics (RFD-Cyc; MPOP1); 
-        4.New Metrics: PI/PTM/Stability/Interactions;
-        5.Smarter biased MPNN;
-        6.Automation of my pipelines.
         '''
-        self.outdir=outdir
+        self._outdir=outdir
+        self.outdir=Path(outdir)
         self.binder_name=binder_name
-        self.post_ana_dir=post_ana_dir
-        self.mpnn_rescore_path=mpnn_rescore_path
-        self.rescore_path=rescore_path
+        self._post_stem=post_stem
+        self._mpnn_stem=mpnn_stem
+        self._graft_stem=graft_stem
+        self.templated=templated_refold
         self.filters=filters
-        self.mode=mode
+        self.advanced_settings_overload=advanced_settings_overload
 
+        self.post_dir=Path(outdir)/'Trajectory'/post_stem
+        self.mpnn_csv=self.post_dir/f'{mpnn_stem}.csv'
+        self.graft_dir=Path(outdir)/'Trajectory'/graft_stem
 
-        self._p=Path(outdir)
-        setting_file=self._p/f'{binder_name}.json'
-        self.target_settings_file=str(setting_file)
-        with open(setting_file,'r') as f:
-            target_settings:Dict[str,Any]=json.load(f)
-        self.starting_pdb=target_settings['starting_pdb']
-        self.chains=target_settings['chains']
-        self.target_hotspot_residues=target_settings['target_hotspot_residues']
-        self.advanced_settings_path=str(self._p/'advanced_settings.json')
-        self.filter_settings_path='settings_filters/no_filters.json'
-        
-        self.init_task()
-        self.load_mpnn_df()
+        setting_file=self.outdir/f'{binder_name}.json'
 
-
-    def load_mpnn_df(self):
-        if self.mode=='grafted':
-            mpnn_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.post_ana_dir}/MPNN.csv').set_index('Design')
-            mpnn_rescore_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.rescore_path}/log.csv').set_index('Design')
-            mpnn_rescore_df.columns=[ 'r:'+i if i !='r_pdb' else i for i in mpnn_rescore_df.columns ]
-            self.mpnn_df=pd.merge(left=mpnn_df,right=mpnn_rescore_df,left_index=True,right_index=True)
-            self.mpnn_df=check_filters(self.mpnn_df,self.filters).sort_values(by='seq',key=lambda x:x.str.len())
-            self.rescore_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.rescore_path}/log.csv').set_index('Design')
-            # rescore df would be used to load templates
-            return self.mpnn_df
-        elif self.mode=='direct':
-            raise NotImplementedError
+        if not rescore_csv:
+            self.target_settings_file=str(setting_file)
+            with open(setting_file,'r') as f:
+                target_settings:Dict[str,Any]=json.load(f)
+            for k in ['starting_pdb','chains','target_hotspot_residues']:
+                setattr(self,k,target_settings[k])
         else:
-            raise ValueError
+            self.target_settings_file=''
+            for k in ['starting_pdb','chains','target_hotspot_residues']:
+                setattr(self,k,target_settings_args[k])
+            
+            # self.starting_pdb=target_settings[]
+            # self.chains=target_settings[]
+            # self.target_hotspot_residues=target_settings[]
+        
+        if (self.outdir/'advanced_settings.json').exists():
+            self.advanced_settings_path=str(self.outdir/'advanced_settings.json')
+        else:
+            self.advanced_settings_path=default_advanced_settings_path
+        self.filter_settings_path='settings_filters/no_filters.json'
+        if self.target_settings_file:
+            self.load_mpnn_df()
+        else:
+            assert rescore_csv
+            assert not templated_refold
+
+            self.load_any_df(rescore_csv)
+        self.init_task()
+        
+    def load_any_df(self,csvfile:str):
+        '''
+        for convenience, still named as mpnn_df.
+        conserved cols: Design,seq.
+        '''
+        self.mpnn_df=pd.read_csv(csvfile).set_index('Design').sort_values(by='seq',key=lambda x:x.str.len())
+    def load_mpnn_df(self):
+        '''
+        filter conducted in `Metrics.mpnn_sample`
+        '''
+        mpnn_df=pd.read_csv(self.mpnn_csv).set_index('Design')
+        if self.filters is not None:
+            if 'filt' in mpnn_df.columns:
+                print('re-filter MPNN df by given `filters` dict')
+            mpnn_df=check_filters(mpnn_df,self.filters)
+        
+        if 'filt' in mpnn_df.columns:
+            print(f'MPNN df are filtered. {len(mpnn_df)} designs left.')
+            mpnn_df=mpnn_df[mpnn_df['filt']=='All_Good'].drop(columns='filt')
+
+        if self.templated:
+            assert 'design_id' in mpnn_df.columns
+            mpnn_df['template_pdb']=mpnn_df['design_id'].apply(lambda x: str(self.graft_dir/f'{x}.pdb'))
+
+        mpnn_df['seq_len'] = mpnn_df['seq'].str.len()
+        mpnn_df = mpnn_df.sort_values(by=['seq_len', 'design_id'],
+            ascending=[True, True]).drop(columns='seq_len')
+        
+        self.mpnn_df=mpnn_df
+
+        # if self.mode=='grafted':
+        #     mpnn_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.post_ana_dir}/MPNN.csv').set_index('Design')
+        #     mpnn_rescore_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.rescore_path}/log.csv').set_index('Design')
+        #     mpnn_rescore_df.columns=[ 'r:'+i if i !='r_pdb' else i for i in mpnn_rescore_df.columns ]
+        #     self.mpnn_df=pd.merge(left=mpnn_df,right=mpnn_rescore_df,left_index=True,right_index=True)
+        #     self.mpnn_df=check_filters(self.mpnn_df,self.filters).sort_values(by='seq',key=lambda x:x.str.len())
+        #     self.rescore_df=pd.read_csv(f'{self.outdir}/Trajectory/{self.rescore_path}/log.csv').set_index('Design')
+        #     # rescore df would be used to load templates
+        #     return self.mpnn_df
+        # elif self.mode=='direct':
+        #     raise NotImplementedError
+        # else:
+        #     raise ValueError
 
     def init_task(self):
         (self.target_settings, self.advanced_settings, self.filters,
@@ -115,7 +195,7 @@ class Score:
             load_previous_target_settings=self.target_settings_file,
             advanced_settings_path=self.advanced_settings_path,
             filter_settings_path=self.filter_settings_path,
-            design_path=self.outdir,
+            design_path=self._outdir,
             binder_name=self.binder_name,
             starting_pdb=self.starting_pdb,
             chains=self.chains,
@@ -123,14 +203,118 @@ class Score:
             lengths = "10,20",number_of_final_designs = 1,
             )
         self._cyclic=self.advanced_settings['cyclize_peptide']
+        if len(self.advanced_settings_overload)>0:
+            print('advanced_settings are overloaded.')
+            self.advanced_settings.update(self.advanced_settings_overload)
+            with open(self.outdir/'rescore_advanced_settings.json','w') as f:
+                json.dump(self.advanced_settings,f)
+        if not self.advanced_settings['omit_AAs']:
+            self.advanced_settings['omit_AAs']=None
 
-    def score(self):
-        raise NotImplementedError
+    def score(self,seed:int=42):
+        m_model,b_model=self.complex_prediction_model,self.binder_prediction_model
+        scored_designs=self._scored_designs()
+        mpnn_df=self.mpnn_df.loc[[i for i in self.mpnn_df.index if i not in scored_designs]]
+        target_chain=self.target_settings['chains']
         prev_seq_len=-1
-        good_mpnn_df=self.mpnn_df[self.mpnn_df['filt']=='All_Good']
-        for design_id,sub_df in good_mpnn_df.groupby('design_id'):
+        if self.templated:
+            for template_pdb,sub_df in tqdm(mpnn_df.groupby(by='template_pdb')):
+                seq_len=len(sub_df['seq'].iloc[0])
+                m_model.prep_inputs(
+                    pdb_filename=template_pdb, 
+                    chain=target_chain, binder_chain='B', binder_len=seq_len, 
+                    use_binder_template=True, 
+                    rm_target_seq=self.advanced_settings["rm_template_seq_predict"],
+                    rm_target_sc=self.advanced_settings["rm_template_sc_predict"], 
+                    rm_template_ic=True,seed=seed)
+                if seq_len!=prev_seq_len:
+                    prev_seq_len=seq_len
+                    b_model.prep_inputs(length=seq_len,seed=seed)
+                if self._cyclic:
+                    add_cyclic_offset(m_model, offset_type=2)
+                    add_cyclic_offset(b_model, offset_type=2)
+                    
+                for mpnn_id,seq in sub_df['seq'].items():
+                    print(f"run {mpnn_id}")
+                    (mpnn_complex_averages,binder_averages,seq_notes,
+                    complex_prediction_model,binder_prediction_model
+                    )=bindcraft_score(
+                        binder_sequence=seq,design_name=mpnn_id,trajectory_pdb=template_pdb,
+                        target_settings=self.target_settings,advanced_settings=self.advanced_settings,filters=self.filters,
+                        prediction_models=self.prediction_models,
+                        settings_file=self.settings_file,filters_file='null',advanced_file=self.advanced_file,
+                        complex_prediction_model=m_model,binder_prediction_model=b_model,
+                        design_paths=self.design_paths, seed=seed)
 
-            seq=s['seq']
+        else:
+            pdb_file=self.target_settings['starting_pdb']
+            for mpnn_id,s in mpnn_df.iterrows():
+                seq=s['seq']
+                seq_len=len(seq)
+                if prev_seq_len!=seq_len:
+                    m_model.prep_inputs(pdb_filename=pdb_file, 
+                        chain=target_chain, 
+                        binder_len=seq_len, 
+                        rm_target_seq=self.advanced_settings["rm_template_seq_predict"],
+                        rm_target_sc=self.advanced_settings["rm_template_sc_predict"],
+                        seed=seed)
+                    b_model.prep_inputs(length=seq_len)
+                    if self._cyclic:
+                        add_cyclic_offset(m_model, offset_type=2)
+                        add_cyclic_offset(b_model, offset_type=2)
+                    prev_seq_len=seq_len
+                print(f"run {mpnn_id}")
+                (mpnn_complex_averages,binder_averages,seq_notes,
+                    complex_prediction_model,binder_prediction_model)=bindcraft_score(
+                    binder_sequence=seq,design_name=mpnn_id,trajectory_pdb=None,
+                        target_settings=self.target_settings,advanced_settings=self.advanced_settings,filters=self.filters,
+                        prediction_models=self.prediction_models,
+                        settings_file=self.settings_file,filters_file='null',advanced_file=self.advanced_file,
+                        complex_prediction_model=m_model,binder_prediction_model=b_model,
+                        design_paths=self.design_paths, seed=seed,)
+                
+    def _scored_designs(self)->List[str]:
+        if os.path.exists(self.outdir/'final_design_stats.csv'):
+            _=pd.read_csv(self.outdir/'final_design_stats.csv')
+            if len(_)>0:
+                finished=_['Design'].to_list()
+            else:
+                finished=[]
+        else:
+            finished=[]
+        return finished
+        # prev_seq_len=-1
+        # good_mpnn_df=self.mpnn_df[self.mpnn_df['filt']=='All_Good']
+        # for design_id,sub_df in good_mpnn_df.groupby('design_id'):
+
+        #     seq=s['seq']
+
+    @property
+    def complex_prediction_model(self):
+        advanced_settings=self.advanced_settings
+        if getattr(self,'_complex_prediction_model',None) is None:
+            if self.templated:
+                use_initial_guess,use_initial_atom_pos=True,True
+            else:
+                use_initial_guess,use_initial_atom_pos=False,False
+            self._complex_prediction_model = mk_afdesign_model(protocol="binder", 
+                num_recycles=advanced_settings["num_recycles_validation"], 
+                data_dir=advanced_settings["af_params_dir"], 
+                use_multimer=self.multimer_validation, 
+                use_initial_guess=use_initial_guess, 
+                use_initial_atom_pos=use_initial_atom_pos)
+        return self._complex_prediction_model
+    
+    @property
+    def binder_prediction_model(self):
+        advanced_settings=self.advanced_settings
+        if getattr(self,'_binder_prediction_model',None) is None:
+            self._binder_prediction_model=mk_afdesign_model(
+                protocol="hallucination", use_templates=False, initial_guess=False, 
+                use_initial_atom_pos=False, num_recycles=advanced_settings["num_recycles_validation"], 
+                data_dir=advanced_settings["af_params_dir"], use_multimer=self.multimer_validation)
+        return self._binder_prediction_model
+    
 def bindcraft_score(
     binder_sequence:str,
     design_name:str,
