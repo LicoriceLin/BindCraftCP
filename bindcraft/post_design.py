@@ -504,6 +504,17 @@ class Metrics:
             penalty_recipes=penalty_recipes,model_params=model_params)
         if os.path.exists(self.ana_paths['post_dir']+f'{mpnn_stem}.csv'):
             mpnn_sampler.load_samples(self.post_stem,mpnn_stem)
+            finished=set([i.split('-m')[0] for i in mpnn_sampler.mpnn_df.index])
+            new_idx=np.where(~self.metrics.index.isin(finished))[0].tolist()
+            if len(new_idx)>0:
+                sub_m=self[new_idx]
+                sub_mpnn_sampler=sub_m._init_mpnn_sample(filter=_filter,
+                    penalty_recipes=penalty_recipes,model_params=model_params)
+                sub_mpnn_sampler.run_mpnn(mode=mode,max_mpnn_sequences=max_mpnn_sequences,
+                    num_sample=num_sample,seed=seed
+                    )
+                mpnn_sampler.mpnn_df=pd.concat([mpnn_sampler.mpnn_df,sub_mpnn_sampler.mpnn_df])
+
         else:
             mpnn_sampler.run_mpnn(mode=mode,max_mpnn_sequences=max_mpnn_sequences,
                 num_sample=num_sample,seed=seed

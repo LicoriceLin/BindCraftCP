@@ -90,7 +90,7 @@ class Design:
             self.advanced_settings.update(self.advanced_settings_overload)
 
             with open(self.outdir/'advanced_settings.json','w') as f:
-                json.dump(self.advanced_settings,f)      
+                json.dump(self.advanced_settings,f, indent=2)      
             if not self.advanced_settings['omit_AAs']:
                 self.advanced_settings['omit_AAs']=None
             

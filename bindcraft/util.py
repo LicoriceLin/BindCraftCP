@@ -175,6 +175,11 @@ _refold_filter_loose={'r:plddt':{'threshold': 0.7, 'higher': True},
     'r:rmsd':{'threshold': 2, 'higher': False}
     }
 
+_bindcraft_4stage_midfilter={'Relaxed_Clashes':{'threshold': 0, 'higher': False},
+    'pLDDT':{'threshold': 0.7, 'higher': True},
+    'n_InterfaceResidues':{'threshold': 3, 'higher': True}
+    }
+
 _bc_design_benchmark_filters={
     'pLDDT':{'threshold': 0.70, 'higher': True},
     'n_InterfaceResidues':{'threshold': 3, 'higher': True},
