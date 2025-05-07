@@ -77,7 +77,7 @@ class Score:
             },
         # templated_refold are only available for "rescore from mpnn results"
         templated_refold:bool=False,
-        graft_stem:str='graft', # for refold templates 
+        refold_stem:str='rescore', # for refold templates 
         # no need for "rescore from mpnn results". overided by outdir/'advanced_settings.json'
         default_advanced_settings_path:str='settings_advanced/mcmcsampling_multimer_cyc.json', 
         filters:filters_type|None=None, #None: use 'filt' col in mpnn df or skip filter. 
@@ -102,14 +102,14 @@ class Score:
         self.binder_name=binder_name
         self._post_stem=post_stem
         self._mpnn_stem=mpnn_stem
-        self._graft_stem=graft_stem
+        self._refold_stem=refold_stem
         self.templated=templated_refold
         self.filters=filters
         self.advanced_settings_overload=advanced_settings_overload
 
         self.post_dir=Path(outdir)/'Trajectory'/post_stem
         self.mpnn_csv=self.post_dir/f'{mpnn_stem}.csv'
-        self.graft_dir=Path(outdir)/'Trajectory'/graft_stem
+        self.refold_dir=Path(outdir)/'Trajectory'/refold_stem
 
         setting_file=self.outdir/f'{binder_name}.json'
 
@@ -148,6 +148,7 @@ class Score:
         conserved cols: Design,seq.
         '''
         self.mpnn_df=pd.read_csv(csvfile).set_index('Design').sort_values(by='seq',key=lambda x:x.str.len())
+    
     def load_mpnn_df(self):
         '''
         filter conducted in `Metrics.mpnn_sample`
@@ -164,7 +165,7 @@ class Score:
 
         if self.templated:
             assert 'design_id' in mpnn_df.columns
-            mpnn_df['template_pdb']=mpnn_df['design_id'].apply(lambda x: str(self.graft_dir/f'{x}.pdb'))
+            mpnn_df['template_pdb']=mpnn_df['design_id'].apply(lambda x: str(self.refold_dir/f'{x}.pdb'))
 
         mpnn_df['seq_len'] = mpnn_df['seq'].str.len()
         mpnn_df = mpnn_df.sort_values(by=['seq_len', 'design_id'],

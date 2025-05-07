@@ -172,7 +172,7 @@ _RFD_benchmark_filters={
 _refold_filter_strict=_RFD_benchmark_filters
 _refold_filter_loose={'r:plddt':{'threshold': 0.7, 'higher': True},
     'r:i_pae':{'threshold': 0.4, 'higher': False},
-    'r:rmsd':{'threshold': 2, 'higher': False}
+    'r:rmsd':{'threshold': 6, 'higher': False}
     }
 
 _bindcraft_4stage_midfilter={'Relaxed_Clashes':{'threshold': 0, 'higher': False},
@@ -198,7 +198,7 @@ def _check_filters(entry:pd.Series, filters:dict=_default_filters):
     # check filters against thresholds
     for label, conditions in filters.items():
         # special conditions for interface amino acid counts
-        if label == 'InterfaceAAs':
+        if 'InterfaceAAs' in label:
             for aa, aa_conditions in conditions.items():
                 if entry.get(label) is None:
                     continue

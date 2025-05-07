@@ -18,7 +18,7 @@ from .biophy_metrics import (
 from .mda_metrics import cal_ppi_interacts,cal_rog
 
 # if TYPE_CHECKING:
-from .mpnn import MPNNSampler,minimal_penalty_recipes,PenaltyRecipe,_default_model_params
+from .mpnn import MPNNSampler,minimal_penalty_recipes,PenaltyRecipe,_default_mpnn_model_params
 
 
 # %% post analysis
@@ -53,6 +53,9 @@ _direct_refold_model_params=dict(
     use_multimer=False,use_initial_guess=False, use_initial_atom_pos=False,rm_target_sc=False)
 
 class Metrics:
+    '''
+    TODO controlled by advanced settings. 
+    '''
     def __init__(self,
         outdir:str,
         mode:Literal['design','mpnn','slice']='design',
@@ -79,7 +82,11 @@ class Metrics:
         elif mode=='mpnn': # TODO change to `rescore`
             self.metrics:pd.DataFrame=read_bc_metrics(outdir,use_rmsd=True)
             self._raw_metrics=pd.read_csv(f'{outdir}/final_design_stats.csv'
-                ).drop_duplicates(subset=['Design'], keep='last')
+                ).drop_duplicates(subset=['Design'], keep='last').set_index('Design')
+            for i in self._raw_metrics.columns:
+                if 'InterfaceAAs' in i:
+                    # m._raw_metrics[i]
+                    self._raw_metrics[i]=self._raw_metrics[i].fillna('{}').apply(literal_eval)
             os.makedirs(f'{outdir}/MPNN/{_p}',exist_ok=True)
             _s=self._subdir='MPNN'
             self.ana_paths=dict(
@@ -334,6 +341,12 @@ class Metrics:
     def _filter(self,filters:filters_type=_simpliest_filter):
         self.filters=filters
         check_filters(self.metrics,filters)
+    
+    def _filter_raw(self,filters_json:str='settings_filters/default_filters.json'):
+        '''same behavior as original BindCraft'''
+        assert hasattr(self,'_raw_metrics')
+        check_filters(self._raw_metrics,json.load(open(filters_json,'r')))
+        self.metrics['filt']=self._raw_metrics['filt']
 
     @property
     def _pdbs(self):
@@ -432,7 +445,7 @@ class Metrics:
     
     def _init_mpnn_sample(self,filter=True,
         penalty_recipes:List[PenaltyRecipe]=minimal_penalty_recipes,
-        model_params:Dict[str,Any]=_default_model_params):
+        model_params:Dict[str,Any]=_default_mpnn_model_params):
         self._mpnn_sampler=MPNNSampler(self,filter=filter,penalty_recipes=penalty_recipes,model_params=model_params)
 
         return self._mpnn_sampler
@@ -487,7 +500,7 @@ class Metrics:
         max_mpnn_sequences:int=5,num_sample:int=30,
         mpnn_refold_dir:str='mpnn_rescore',mpnn_stem:str='MPNN',
         penalty_recipes:List[PenaltyRecipe]=minimal_penalty_recipes,
-        model_params:Dict[str,Any]=_default_model_params,
+        model_params:Dict[str,Any]=_default_mpnn_model_params,
         pred_models=[0],seed:int=42,
         ):
         self.mpnn_mode=mode

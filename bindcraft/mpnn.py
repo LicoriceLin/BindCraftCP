@@ -245,13 +245,13 @@ def run_mpnn(
         sum_mpnn_df=pd.DataFrame(columns=['Design','seq','score','design_id']).set_index('Design')
     return sum_mpnn_df
 
-_default_model_params=dict(backbone_noise=0.0,model_name='v_48_020',weights='soluble',seed=42)
+_default_mpnn_model_params=dict(backbone_noise=0.0,model_name='v_48_020',weights='soluble',seed=42)
 class MPNNSampler:
     def __init__(self,
         metrics:Metrics,
         filter:bool=True,
         penalty_recipes:List[PenaltyRecipe]=default_penalty_recipes,
-        model_params:Dict[str,Any]=_default_model_params
+        model_params:Dict[str,Any]=_default_mpnn_model_params
         ):
         '''
         filter: only run those with 'All_Good' in metrics.metrics['filt']
