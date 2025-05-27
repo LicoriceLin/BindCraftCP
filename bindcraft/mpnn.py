@@ -211,7 +211,7 @@ def run_mpnn(
             fix_po=np.where(bias[:,-1]==0)[0]
             fixed_positions = 'A,' + ','.join(f'B{i+1}' for i in fix_po)
         elif mode == 'non_ppi':
-            fix_po=np.where(ptm_track['ppi']==0)[0]
+            fix_po=np.where(ptm_track['ppi']==1)[0]
             fixed_positions = 'A,' + ','.join(f'B{i+1}' for i in fix_po)
         elif mode == 'whole':
             fixed_positions = 'A' 

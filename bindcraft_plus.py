@@ -124,7 +124,7 @@ if __name__=='__main__':
     score.score()
 
     metrics_m=Metrics(outdir=outdir,mode='mpnn')
-    if args.filter_on:
+    if args.filter_on == 'raw':
         metrics_m._filter_raw(args.filter_setting)
     else:
         metrics_m.filter(refold_mode='none',

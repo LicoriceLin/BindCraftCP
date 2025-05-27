@@ -82,8 +82,8 @@ def read_bc_metrics(outdir:str|None=None,model_ids:None|List[int]=None,df:pd.Dat
             ).drop_duplicates(subset=['Design'], keep='last')
     else:
         final_score_df=df
-    final_score_df['Target_Hotspot'].fillna('',inplace=True)
-    final_score_df['InterfaceResidues'].fillna('',inplace=True)
+    final_score_df['Target_Hotspot']=final_score_df['Target_Hotspot'].fillna('')
+    final_score_df['InterfaceResidues']=final_score_df['InterfaceResidues'].fillna('')
     if model_ids is None:
         used_cols=_meta_cols+[f'Average_{i}' for i in metrics_col+[_aa_col]]
         bc_metrics=final_score_df[used_cols].copy()
@@ -163,31 +163,28 @@ def _load_default_filters(bindcraft_benchmark:bool=False):
     return filter
     # filter['n_InterfaceUnsatHbonds']={'threshold': 40, 'higher': False}
 filters_type=Dict[str,Dict[str,float|int|bool]]
-_bc_benchmark_filters=_load_default_filters(True)
+
+# baselines:
+_bc_benchmark_filters=_load_default_filters(bindcraft_benchmark=True) # BindCraft's default filters.
 _RFD_benchmark_filters={
     'r:plddt':{'threshold': 0.80, 'higher': True},
     'r:i_pae':{'threshold': 10/31, 'higher': False}, # 31 is the normalization scale in colabdesign.
     'r:rmsd':{'threshold': 1, 'higher': False},
-    }
+    } # filters as of RFDiffusion
+_bindcraft_4stage_midfilter={'Relaxed_Clashes':{'threshold': 0, 'higher': False},
+    'pLDDT':{'threshold': 0.7, 'higher': True},
+    'n_InterfaceResidues':{'threshold': 3, 'higher': True}
+    } # threshold to trigger sampling termination in BindCraft.
+_bc_design_benchmark_filters=_bindcraft_4stage_midfilter
+
+# experimentally optimized filters
+_simpliest_filter={'pLDDT':{'threshold': 0.70, 'higher': True}}
+_default_filters=_load_default_filters() #default filters modified according to MPOP1 benchmarks.
 _refold_filter_strict=_RFD_benchmark_filters
 _refold_filter_loose={'r:plddt':{'threshold': 0.7, 'higher': True},
     'r:i_pae':{'threshold': 0.4, 'higher': False},
     'r:rmsd':{'threshold': 6, 'higher': False}
     }
-
-_bindcraft_4stage_midfilter={'Relaxed_Clashes':{'threshold': 0, 'higher': False},
-    'pLDDT':{'threshold': 0.7, 'higher': True},
-    'n_InterfaceResidues':{'threshold': 3, 'higher': True}
-    }
-
-_bc_design_benchmark_filters={
-    'pLDDT':{'threshold': 0.70, 'higher': True},
-    'n_InterfaceResidues':{'threshold': 3, 'higher': True},
-    'Relaxed_Clashes':{'threshold': 0, 'higher': False},
-}
-
-_default_filters=_load_default_filters()
-_simpliest_filter={'pLDDT':{'threshold': 0.70, 'higher': True}}
 
 def _check_filters(entry:pd.Series, filters:dict=_default_filters):
     '''

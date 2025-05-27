@@ -325,14 +325,18 @@ def binder_hallucination(design_name:str, starting_pdb:str, chain:str,
                                                         num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True,
                                                         seq_logits=af_model.aux["seq"]["pssm"][0])
                         else:
-                            half_life = round(advanced_settings["greedy_iterations"] / 5, 0)
+                            half_life = advanced_settings["greedy_iterations"]
                             t_mcmc = 0.01
                             af_model._design_mcmc(
-                                steps=advanced_settings["greedy_iterations"], 
+                                steps=advanced_settings["greedy_iterations"]*5, 
                                 half_life=half_life, 
                                 T_init=t_mcmc, mutation_rate=greedy_tries, num_models=1, 
-                                models=advanced_settings["sample_models"],
+                                models=design_models,
                                 sample_models=advanced_settings["sample_models"], save_best=True)
+                            best = af_model._tmp["best"]
+                            af_model.aux, seq = best["aux"], jnp.array(best["aux"]["seq"]['input'])
+                            af_model.set_seq(seq=seq, bias=af_model._inputs["bias"])
+                            af_model._save_results(save_best=True, verbose=False)
 
                 else:
                     update_failures(failure_csv, 'Trajectory_one-hot_pLDDT')

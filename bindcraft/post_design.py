@@ -339,6 +339,7 @@ class Metrics:
             return ret
     
     def _filter(self,filters:filters_type=_simpliest_filter):
+        #TODO: conversion bwtween offical filters jsons and jsons used for metrics.
         self.filters=filters
         check_filters(self.metrics,filters)
     

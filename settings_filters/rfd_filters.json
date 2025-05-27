@@ -1,0 +1,15 @@
+{
+"pLDDT":{"threshold": 0.7, "higher": true},
+"i_pAE": {
+        "threshold": 0.35,
+        "higher": false
+    },
+"Binder_Energy_Score": {
+        "threshold": -10,
+        "higher": false
+    },
+"ShapeComplementarity": {
+        "threshold": 0.55,
+        "higher": true
+    }
+} 
