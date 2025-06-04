@@ -207,9 +207,9 @@ def gen_ana_tracks(
         o['ppi']=np.zeros(len(o['seq']),dtype=int)
         if s['InterfaceResidues']!='':
            o['ppi'][[int(i[1:])-1 for i in s['InterfaceResidues'].split(',')]]=1
-        o['ppi'] = o['ppi'] & (o['sasa']>sasa_threshold)
+        # o['ppi1'] = o['ppi'] #& (o['sasa']>sasa_threshold)
         o['surf']=(o['sasa']>sasa_threshold) & (~o['ppi'])
-        o['core']=(o['sasa']<=sasa_threshold).astype(int)
+        o['core']=(o['sasa']<=sasa_threshold) & (~o['ppi'])  #(o['sasa']<=sasa_threshold).astype(int)
         if ptms is not None:
             for k,v in ptms.items():
                 o[k]=np.zeros(len(o['seq']),dtype=float)

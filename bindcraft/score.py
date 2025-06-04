@@ -137,7 +137,7 @@ class Score:
             self.load_mpnn_df()
         else:
             assert rescore_csv
-            assert not templated_refold
+            # assert not templated_refold
 
             self.load_any_df(rescore_csv)
         self.init_task()
@@ -145,7 +145,7 @@ class Score:
     def load_any_df(self,csvfile:str):
         '''
         for convenience, still named as mpnn_df.
-        conserved cols: Design,seq.
+        conserved cols: Design,seq,template_pdb
         '''
         self.mpnn_df=pd.read_csv(csvfile).set_index('Design').sort_values(by='seq',key=lambda x:x.str.len())
     
@@ -208,7 +208,7 @@ class Score:
             print('advanced_settings are overloaded.')
             self.advanced_settings.update(self.advanced_settings_overload)
             with open(self.outdir/'rescore_advanced_settings.json','w') as f:
-                json.dump(self.advanced_settings,f)
+                json.dump(self.advanced_settings,f,indent=2)
         if not self.advanced_settings['omit_AAs']:
             self.advanced_settings['omit_AAs']=None
 
@@ -227,7 +227,8 @@ class Score:
                     use_binder_template=True, 
                     rm_target_seq=self.advanced_settings["rm_template_seq_predict"],
                     rm_target_sc=self.advanced_settings["rm_template_sc_predict"], 
-                    rm_template_ic=True,seed=seed)
+                    rm_template_ic=self.advanced_settings.get("rm_template_sc_predict",True),
+                    seed=seed)
                 if seq_len!=prev_seq_len:
                     prev_seq_len=seq_len
                     b_model.prep_inputs(length=seq_len,seed=seed)
