@@ -1,37 +1,4 @@
 # %% Dependencies
-# import glob
-# import os
-# # from pathlib import Path
-# from pathlib import PosixPath as Path
-# from tqdm import tqdm
-# from subprocess import run
-# from itertools import product, combinations
-# from typing import Iterable,Union,Callable,Generator,List,Dict,Tuple
-# from tempfile import TemporaryDirectory
-# import pickle as pkl
-# import json
-# from ast import literal_eval
-
-# import pandas as pd
-# from pandas.api.types import CategoricalDtype
-# import numpy as np
-# import math
-
-# import matplotlib.pyplot as plt
-# import matplotlib.colors as mcolors
-# from matplotlib.backends.backend_pdf import PdfPages
-# import seaborn as sns
-# from statannotations.Annotator import Annotator
-
-# import Bio.PDB as BP
-# from Bio.PDB import PDBParser
-# from Bio.PDB.Entity import Entity
-# from Bio.PDB.Atom import Atom
-# from Bio.PDB.Residue import Residue
-
-# from Bio.PDB.SASA import ShrakeRupley
-# from collections.abc import Iterable as collections_Iterable
-# from Bio.Data import PDBData
 from ._import import *
 from .util import write_out,pdbfile2id
 import pdbfixer
@@ -207,7 +174,6 @@ def gen_ana_tracks(
         o['ppi']=np.zeros(len(o['seq']),dtype=int)
         if s['InterfaceResidues']!='':
            o['ppi'][[int(i[1:])-1 for i in s['InterfaceResidues'].split(',')]]=1
-        # o['ppi1'] = o['ppi'] #& (o['sasa']>sasa_threshold)
         o['surf']=(o['sasa']>sasa_threshold) & (~o['ppi'])
         o['core']=(o['sasa']<=sasa_threshold) & (~o['ppi'])  #(o['sasa']<=sasa_threshold).astype(int)
         if ptms is not None:
