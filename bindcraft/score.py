@@ -5,7 +5,7 @@ from .bc_util import init_task
 
 from .util import _RFD_benchmark_filters as _default_mpnn_filter
 from .util import filters_type,check_filters
-# from functions import hotspot_residues,mk_afdesign_model,add_cyclic_offset
+from colabdesign import mk_afdesign_model
 
 '''
     Prefilter (maintained in Metrics Core)
