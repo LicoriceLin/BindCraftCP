@@ -19,18 +19,82 @@ class BaseStep(ABC):
     def __init__(self,
         settings:GlobalSettings,**kwargs):
         self.settings=settings
+        # initial prefix: adv[f'{self.name}-prefix'] > self._default_metrics_prefix
+        self.config_metrics_prefix() 
 
+    @property
     @abstractmethod
-    def __call__(self, input: DesignBatch|None)->DesignBatch:
+    def name(self):
         pass
 
+    @property
+    @abstractmethod
+    def _default_metrics_prefix(self):
+        pass
+
+
+    def check_processed(self,input: DesignRecord)->bool:
+        '''
+        default purge behavior:
+            check if metrics_prefix.strip('-') in record.pdb_strs or pdb_files
+        '''
+        pdb_key=self.metrics_prefix.strip('-')
+        if input.has_pdb(pdb_key):
+            return True
+        else:
+            return False
+        
+    @abstractmethod
+    def process_record(self, input: DesignRecord|None=None)->DesignRecord|None:
+        '''
+        Don't purge output pdb here!
+        '''
+        pass
+
+    @abstractmethod
+    def process_batch(self, 
+        input: DesignBatch|None=None,
+        pdb_purge_stem:Optional[str]=None,
+        metrics_prefix:str|None=None
+        )->DesignBatch|None:
+        '''
+        '''
+        self.config_pdb_purge(pdb_purge_stem)
+        self.config_metrics_prefix(metrics_prefix)
+        return input
+    
+    def purge_record(self,record:DesignRecord):
+        '''
+        default purge behavior:
+            dump record.pdb_strs[metrics_prefix.strip('-')] to self.pdb_purge_dir if it exists
+        '''
+        pdb_key=self.metrics_prefix.strip('-')
+        if self.pdb_purge_dir is not None:
+            record.purge_pdb(pdb_key,self.pdb_purge_dir/f'{record.id}.pdb')
+
     def config_pdb_purge(self,pdb_purge_stem:Optional[str]=None):
+        '''
+        default behavior:
+            if pdb_purge_stem is not None, create it and set it to `pdb_purge_dir`
+        '''
         if pdb_purge_stem is not None:
             pdb_purge_dir=Path(self.settings.binder_settings.design_path)/pdb_purge_stem
             pdb_purge_dir.mkdir(exist_ok=True,parents=True)
             self.pdb_purge_dir=pdb_purge_dir
         else:
             self.pdb_purge_dir=None
+
+    def config_metrics_prefix(self,metrics_prefix:Optional[str]=None):
+        '''
+        metrics_prefix > adv[f'{self.name}-prefix'] > self._default_metrics_prefix
+        '''
+        if metrics_prefix is not None:
+            self.metrics_prefix=metrics_prefix
+        else:
+            self.metrics_prefix=self.settings.adv.get(
+                f'{self.name}-prefix',self._default_metrics_prefix)
+
+
 
 def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
     '''add cyclic offset to connect N and C term'''

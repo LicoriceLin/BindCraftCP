@@ -12,7 +12,15 @@ class Hallucinate(BaseStep):
         ):
         super().__init__(settings)
         self.init_afdesign_model(af_model)
-
+        
+    @property
+    def name(self):
+        return 'hallucinate'
+    
+    @property
+    def _default_metrics_prefix(self):
+        return 'halu-'
+    
     def init_afdesign_model(
         self,
         af_model:mk_afdesign_model|None=None,
@@ -66,7 +74,8 @@ class Hallucinate(BaseStep):
             add_termini_distance_loss(af_model, advanced_settings["weights_termini_loss"])
         add_helix_loss(af_model, helicity_value)
 
-    def sample_trajectory(self,design_id:str,prefix:str='halu-')->DesignRecord:
+    def sample_trajectory(self,input:DesignRecord)->DesignRecord:
+        prefix=self.metrics_prefix
         af_model=self.af_model
         advanced_settings=self.settings.adv
         design_models = [0,1,2,3,4] if advanced_settings["use_multimer_design"] else [0,1]
@@ -101,10 +110,14 @@ class Hallucinate(BaseStep):
             af_model._save_results(save_best=True, verbose=False)
         
         metrics={k:af_model.aux['log'][v] for k,v in {f'{prefix}pLDDT':'plddt',f'{prefix}pTM':'ptm',f'{prefix}i-pTM':'i_ptm',f'{prefix}pAE':'pae',f'{prefix}i-pAE':'i_pae'}.items()}
-        metrics.update({"helix":af_model.opt["weights"]["helix"],'length':af_model._binder_len,'seed':self._current_design_seed})
+        # metrics.update({"helix":af_model.opt["weights"]["helix"],'length':af_model._binder_len,'seed':self._current_design_seed})
         pdbstr=af_model.save_pdb()
-        return DesignRecord(id=design_id,sequence=af_model.get_seq(get_best=False)[0],
-                pdb_strs={prefix.strip('-'):pdbstr},metrics=metrics)
+        input.sequence=af_model.get_seq(get_best=False)[0]
+        input.pdb_strs.update({prefix.strip('-'):pdbstr})
+        input.metrics.update(metrics)
+        return input
+        # return DesignRecord(id=design_id,sequence=af_model.get_seq(get_best=False)[0],
+        #         pdb_strs={prefix.strip('-'):pdbstr},metrics=metrics)
     
     def log_trajectory(self):
         raise NotImplementedError
@@ -112,12 +125,29 @@ class Hallucinate(BaseStep):
     def config_logger(self):
         raise NotImplementedError
     
-    def __call__(self,prefix:str='halu-',cache_stem:str='hallucination',
-        pdb_purge_stem:Optional[str]=None, input=None)->DesignBatch:
-        binder_settings=self.settings.binder_settings
-        batch=DesignBatch(Path(binder_settings.design_path)/cache_stem)
-        batch.load_records()
+    def process_record(self,input:DesignRecord)->DesignRecord:
+        m=input.metrics
+        prefix=self.metrics_prefix
+        self.config_afdesign_model(length=m['length'],seed=m['seed'],helicity_value=m['helix'])
+        record=self.sample_trajectory(input)
+        self.purge_record(record,prefix)
+        return record
+
+    def process_batch(self,
+        batch_cache_stem:str='metrics',
+        pdb_purge_stem:Optional[str]=None,
+        metrics_prefix:str|None=None, 
+        input=None)->DesignBatch:
+        '''
+        cache_stem: path to cache output `DesignBatch`
+        pdb_purge_stem: None: save with batch; else: purge pdb to this dir
+        metrics_prefix: metrics_prefix > adv[f'{self.name}-prefix'] > self._default_metrics_prefix
+        '''
         self.config_pdb_purge(pdb_purge_stem)
+        self.config_metrics_prefix(metrics_prefix)
+        binder_settings=self.settings.binder_settings
+        batch=DesignBatch(Path(binder_settings.design_path)/batch_cache_stem)
+        batch.load_records()
 
         global_id=0
         tot=len(binder_settings.binder_lengths)*len(binder_settings.random_seeds)*len(binder_settings.helix_values)
@@ -127,11 +157,9 @@ class Hallucinate(BaseStep):
                 for helicity_value in binder_settings.helix_values:
                     design_id = binder_settings.binder_name+'-'+str(global_id).zfill(to_fill)
                     if design_id not in batch.records:
-                        self.config_afdesign_model(length,seed,helicity_value)
-                        record=self.sample_trajectory(design_id,prefix=prefix)
-                        if self.pdb_purge_dir is not None:
-                            record.purge_pdb(prefix.strip('-'),self.pdb_purge_dir/f'{record.id}.pdb')
-                        batch.add_record(record)
+                        record=DesignRecord(id=design_id,sequence='',
+                            metrics={"helix":helicity_value,'length':length,'seed':seed})
+                        batch.add_record(self.process_record(record))
                         batch.save_record(design_id)
                     global_id+=1
         return batch

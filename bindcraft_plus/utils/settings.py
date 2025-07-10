@@ -64,6 +64,7 @@ BasicDict=Dict[str,str|bool|int|float]
 @dataclass
 class AdvancedSettings(BaseSettings):
     advanced_paths:List[str] #sequentially override
+    extra_patch: dict = field(repr=False, default_factory=dict)
     _settings: dict = field(init=False, repr=False, default_factory=dict)
     @property
     def settings(self):
@@ -71,7 +72,9 @@ class AdvancedSettings(BaseSettings):
             for file in self.advanced_paths:
                 with open(file, 'r') as file:
                     self._settings.update(json.load(file))
-        self._settings['advanced_paths']=self.advanced_paths
+            self._settings.update(self.extra_patch)
+            self._settings['advanced_paths']=self.advanced_paths
+            self._settings['extra_patch']=self.extra_patch
         return self._settings
     
 @dataclass
@@ -128,16 +131,3 @@ class GlobalSettings(BaseSettings):
         #         d[f.name]=f.type.from_dict(ori_json)
         # return cls(**d)
     
-def test_setting():
-    global_setting=GlobalSettings(
-        target_settings=TargetSettings(starting_pdb='example/PDL1.pdb',chains='A'),
-        binder_settings=BinderSettings(design_path='output/test',binder_name='test',binder_lengths=[40,50],random_seeds=[42,43],helix_values=[0.,-0.5]),
-        advanced_settings=AdvancedSettings(advanced_paths=['settings_advanced/default_4stage_multimer.json','settings_advanced/patch_mcmc.json']),
-        filter_settings=FilterSettings(filters_path='settings_filters/default_filters.json')
-        )
-    load_setting=GlobalSettings.from_dict(global_setting.settings)
-    return load_setting
-    
-    
-    
-

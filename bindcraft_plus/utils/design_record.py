@@ -1,6 +1,6 @@
 from abc import ABC,abstractmethod
 from dataclasses import dataclass,asdict,MISSING
-from typing import List,Dict,Any
+from typing import List,Dict,Any,Optional
 from dataclasses import dataclass,field
 import os,json
 import pandas as pd
@@ -51,6 +51,12 @@ class DesignRecord:
             self.pdb_files[pdb_key]=pdbfile
         self.pdb_strs[pdb_key]=open(pdb_key,'r').read()
 
+    def has_pdb(self,pdb_key:str)->bool:
+        if pdb_key in self.pdb_files or  pdb_key in self.pdb_strs:
+            return True
+        else:
+            return False
+
 class DesignBatch:
     cache_dir:Path
     records:Dict[str,DesignRecord]
@@ -59,30 +65,53 @@ class DesignBatch:
     Overwrite=False: Cache > Batch > Record,
              =True : Cache < Batch < Record
     '''
-    def __init__(self,
-        cache_dir:os.PathLike[str], overwrite:bool=False):
-        self.cache_dir = Path(cache_dir)
-        self.overwrite=overwrite
+    def __init__(self, cache_dir:PathT, overwrite:bool=False):
+        self.set_cache_dir(cache_dir)
+        self.set_overwrite(overwrite)
         self.records={}
-        self.fetch_cache_dir()
+        self.metrics={}
 
-    def fetch_cache_dir(self,cache_dir:PathT=None)->Path:
+    def _fetch_cache_dir(self,cache_dir:Optional[PathT]=None)->Path:
         if cache_dir is None:
             cache_dir=self.cache_dir
         else:
             cache_dir=Path(cache_dir)
         cache_dir.mkdir(exist_ok=True,parents=True)
         return cache_dir
+    
+    def set_overwrite(self,overwrite:bool):
+        self.overwrite=overwrite
+
+    def set_cache_dir(self,cache_dir:PathT):
+        self.cache_dir=self._fetch_cache_dir(cache_dir)
 
     def load_records(self,cache_dir:PathT=None):
-        cache_dir=self.fetch_cache_dir(cache_dir)
+        cache_dir=self._fetch_cache_dir(cache_dir)
         for i in self.cache_dir.iterdir():
-            if i.suffix=='.json' and (
-                (self.overwrite and i.stem not in self.records) 
-                or not self.overwrite):
+            if i.suffix=='.json':
                 # under overwrite mode, assume cache data should be discarded, 
                 # and should not be used to overwrite in-memory records
-                self.records[i.stem]=DesignRecord.from_json(i)
+                if i.stem!='metrics' and (
+                    (not self.overwrite) or (
+                    self.overwrite and i.stem not in self.records) 
+                    ):
+                    self.records[i.stem]=DesignRecord.from_json(i)
+                else:
+                    with open(i,'r') as f:
+                        metrics:dict=json.load(f)
+                    if self.overwrite:
+                        metrics.update(self.metrics)
+                        self.metrics=metrics
+                    else:
+                        self.metrics.update(metrics)
+
+    @classmethod
+    def from_cache(cls,cache_dir:PathT):
+        ret=cls(cache_dir,overwrite=False)
+        ret.load_records()
+
+    def log(self,logs:Dict[str,Any]):
+        self.metrics.update(logs)
 
     def add_record(self,record:DesignRecord):
         if not self.overwrite:
@@ -91,18 +120,15 @@ class DesignBatch:
 
     def save_record(self,record_id:str,cache_dir:PathT|None=None):
         assert record_id in self.records
-        cache_path=self.fetch_cache_dir(cache_dir)/f'{record_id}.json'
+        cache_path=self._fetch_cache_dir(cache_dir)/f'{record_id}.json'
         # if not self.overwrite:
         #     assert not cache_path.exists()
         self.records[record_id].to_json(cache_path)
 
     def save_records(self,cache_dir:PathT=None):
-        cache_dir=self.fetch_cache_dir(cache_dir)
+        cache_dir=self._fetch_cache_dir(cache_dir)
         for k,v in self.records.items():
             self.save_record(k,cache_dir)
-
-    def set_overwrite(self,overwrite:bool):
-        self.overwrite=overwrite
 
     def df(self,metrics:List[str]):
         ret=pd.DataFrame(index=self.records.keys())
@@ -113,6 +139,6 @@ class DesignBatch:
     def __getitem__(self,key:str):
         return self.records[key]
 
-# InputT = TypeVar("InputT", bound=DesignBatch)
-# OutputT = TypeVar("OutputT", bound=DesignBatch)
-
+    def __len__(self):
+        return len(self.records)
+    

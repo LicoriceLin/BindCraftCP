@@ -8,37 +8,31 @@ class Refold(BaseStep):
         super().__init__(settings)
         self.templated=settings.adv.get('templated',False)
     
-    # def _templated_sanity_check(self):
-    #     target_setting=self.settings.target_settings
-    #     assert target_setting.full_target_pdb and target_setting.full_target_chain
-    #     advanced_settings=self.settings.adv
-    #     use_initial_guess=advanced_settings.get("predict_initial_guess",False)
-    #     use_initial_atom_pos=advanced_settings.get("predict_bigbang",False)
-    #     assert use_initial_atom_pos or use_initial_guess
-    # def refold()
-    # @property
-    # def templated(self):
-    #     c_model= self.complex_prediction_model
-    #     if c_model._args['use_initial_guess'] or c_model._args['use_initial_atom_pos']:
-    #         return True
-    #     else:
-    #         return False
+    @property
+    def name(self):
+        return 'refold'
+    
+    @property
+    def _default_metrics_prefix(self):
+        return 'refold-'
     
     def graft_full_target(self,record:DesignRecord):
         raise NotImplementedError
     
     def config_complex_model(self,record:DesignRecord):
         '''
-        record.pdb_files['template'] is conserved for path to template pdb
         '''
         c_model=self.complex_prediction_model
         advanced_settings,s=self.settings.adv,self.settings
         binder_len=len(record.sequence)
         if self.templated:
+            template_pdb_key=advanced_settings.get('template-pdb-key','graft')
             try:
-                template_pdb=record.pdb_files['template']
+                template_pdb=record.pdb_files[template_pdb_key]
             except:
-                raise ValueError('assign template pdb to `record.pdb_files["template"]`')
+                raise ValueError(
+                    f'template-pdb-key `{template_pdb_key}` '
+                    'not found in `record.pdb_files`')
             
             if getattr(self,'current_template_pdb','')!=template_pdb:
                 self.current_template_pdb=template_pdb
@@ -69,7 +63,8 @@ class Refold(BaseStep):
         if getattr(m_model,'_binder_len',0) !=binder_len:
             m_model.prep_inputs(length=binder_len)
         
-    def refold(self,record:DesignRecord,prefix='refold-')->DesignRecord:
+    def refold(self,record:DesignRecord)->DesignRecord:
+        prefix=self.metrics_prefix
         c_model,m_model=self.complex_prediction_model,self.binder_prediction_model
         binder_sequence=record.sequence
         advanced_settings,s=self.settings.adv,self.settings
@@ -102,20 +97,25 @@ class Refold(BaseStep):
         
         return record
     
-    def purge_record(self,record:DesignRecord,prefix:str='refold-'):
-        assert self.pdb_purge_dir is not None
-        advanced_settings,s=self.settings.adv,self.settings
-        prediction_models = [0,1] if advanced_settings['use_multimer_design'] else [0,1,2,3,4]
-        for model_num in prediction_models:
-            refold_id_c=f'{prefix}multimer-{model_num+1}'
-            if refold_id_c in record.pdb_strs:
-                record.purge_pdb(refold_id_c,
-                    self.pdb_purge_dir/'multimer'/f'{record.id}-{model_num+1}.pdb')
+    def purge_record(self,record:DesignRecord):
+        '''
+        create self.pdb_purge_dir/{multimer,monomer}
+        purge refold structure from different af2 model to it.
+        '''
+        if self.pdb_purge_dir is not None:
+            prefix = self.metrics_prefix
+            advanced_settings,s=self.settings.adv,self.settings
+            prediction_models = [0,1] if advanced_settings['use_multimer_design'] else [0,1,2,3,4]
+            for model_num in prediction_models:
+                refold_id_c=f'{prefix}multimer-{model_num+1}'
+                if refold_id_c in record.pdb_strs:
+                    record.purge_pdb(refold_id_c,
+                        self.pdb_purge_dir/'multimer'/f'{record.id}-{model_num+1}.pdb')
 
-            refold_id_m=f'{prefix}monomer-{model_num+1}'
-            if refold_id_m in record.pdb_strs:
-                record.purge_pdb(refold_id_m,
-                    self.pdb_purge_dir/'monomer'/f'{record.id}-{model_num+1}.pdb')
+                refold_id_m=f'{prefix}monomer-{model_num+1}'
+                if refold_id_m in record.pdb_strs:
+                    record.purge_pdb(refold_id_m,
+                        self.pdb_purge_dir/'monomer'/f'{record.id}-{model_num+1}.pdb')
 
     def config_pdb_purge(self, pdb_purge_stem = None):
         super().config_pdb_purge(pdb_purge_stem)
@@ -132,16 +132,45 @@ class Refold(BaseStep):
             d={k:(len(v.sequence),v.pdb_files['template']) for k,v in input.records.items()}
         return sorted(d,key=lambda k:d[k])
 
-    def __call__(self, input:DesignBatch,
-        prefix:str='refold-',pdb_purge_stem:Optional[str]=None):
+    def check_processed(self,input: DesignRecord)->bool:
+        prediction_models = [0,1] if self.settings.adv['use_multimer_design'] else [0,1,2,3,4]
+        prefix=self.metrics_prefix
+        for model_num in prediction_models:
+            refold_id_c=f'{prefix}multimer-{model_num+1}'
+            if not input.has_pdb(refold_id_c):
+                return False
+            refold_id_m=f'{prefix}monomer-{model_num+1}'
+            if not input.has_pdb(refold_id_m):
+                return False
+        return True
+    
+    def process_record(self, input: DesignRecord)->DesignRecord:
+        if not self.check_processed(input):
+            self.config_complex_model(input)
+            self.config_monomer_model(input)
+            self.refold(input)
+            self.purge_record(input)
+        return input    
+    
+    def process_batch(self, input:DesignBatch,
+        pdb_purge_stem:Optional[str]=None,
+        metrics_prefix:str|None=None):
+        '''
+        advanced settings:
+            refold-template-pdb-key:str ='graft' 
+            num_recycles_validation: int
+            use_multimer_design: bool
+            cyclize_peptide: bool
+            rm_template_seq_predict: bool
+            rm_template_sc_predict: bool
+            rm_template_ic_predict: bool
+            num_recycles_validation: int
+
+        '''
         self.config_pdb_purge(pdb_purge_stem)
+        self.config_metrics_prefix(metrics_prefix)
         for design_id in self.sort_batch(input):
-            record=input.records[design_id]
-            self.config_complex_model(record)
-            self.config_monomer_model(record)
-            self.refold(record,prefix)
-            if self.pdb_purge_dir is not None:
-                self.purge_record(record)
+            self.process_record(input.records[design_id])
             input.save_record(design_id)
         return input
 
@@ -177,8 +206,16 @@ class Graft(BaseStep):
         self.graft_target=self.settings.target_settings.full_target_pdb
         self.graft_chain=self.settings.target_settings.full_target_chain
         self.ori_binder_chain=self.settings.target_settings.full_binder_chain
-
-    def graft_binder(self,record:DesignRecord,ori_key:str='halu',graft_key='template'):
+    @property
+    def name(self):
+        return 'graft'
+    
+    @property
+    def _default_metrics_prefix(self):
+        return 'template-'
+    
+    def graft_binder(self,record:DesignRecord,):
+        ori_key=self.settings.adv.get('graft-ori-key','halu')
         with tempfile.TemporaryDirectory() as tdir:
             if ori_key in record.pdb_files:
                 ori_pdb=record.pdb_files[ori_key]
@@ -188,27 +225,30 @@ class Graft(BaseStep):
             else:
                 raise ValueError(f'no ori_pdb_key: {ori_key}')
             
-            if self.pdb_purge_dir is not None:
-                out_pdb=self.pdb_purge_dir/f'{record.id}.pdb'
-            else:
-                out_pdb=Path(tdir)/f'{record.id}.pdb'
-
-            if not out_pdb.exists():
-                _graft_binder(ori_pdb,self.ori_binder_chain,
-                    self.graft_target,self.graft_chain,out_pdb)
-            
-            if self.pdb_purge_dir is not None:
-                record.pdb_files[graft_key]=str(out_pdb)
-            else:
-                record.pdb_strs[graft_key]=open(out_pdb,'r').read()
+            out_pdb=Path(tdir)/f'{record.id}.pdb'
+            _graft_binder(ori_pdb,self.ori_binder_chain,
+                self.graft_target,self.graft_chain,out_pdb)
+            record.pdb_strs[self.metrics_prefix]=open(out_pdb,'r').read()
         return record
-    
-    def __call__(self, input:DesignBatch, pdb_purge_stem:Optional[str]=None,
-            ori_key:str='halu',graft_key='template'):
+
+    def process_record(self,input: DesignRecord)->DesignRecord:
+        if not self.check_processed(input):
+            self.graft_binder(input)
+            self.purge_record(input)
+        return input
+
+    def process_batch(self, input:DesignBatch, 
+        pdb_purge_stem:Optional[str]=None,metrics_prefix:str|None=None):
+        '''
+        advanced settings:
+        graft-ori-key:str = 'halu'
+        graft-prefix:str  = 'template'
+        '''
         self.config_pdb_purge(pdb_purge_stem)
+        self.config_metrics_prefix(metrics_prefix)
         for records_id,record in input.records.items():
-            self.graft_binder(record,ori_key,graft_key)
-        input.save_records()
+            self.process_record(record)
+            input.save_record(records_id)
         return input
     
         # return super().__call__(input)
