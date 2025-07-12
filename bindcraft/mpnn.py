@@ -23,6 +23,9 @@ def _add_bias(bias:np.ndarray,pos:List[int],aas:str,penalty:float):
     bias[pos,-1]=1
     return bias
 
+def _fix_pos(bias:np.ndarray,pos:List[int]):
+    raise NotImplementedError
+
 _ptm_threshold=0.5
 _ppi_esm_threshold=0.05
 _other_esm_threshold=0.5
@@ -180,7 +183,7 @@ def dedup_mpnn_results(mpnn_sequences,length:int,design_id:str):
 def run_mpnn(
     ana_tracks:Dict[str,Dict[str,str|np.ndarray]],
     designid2pdb:Callable[[str],str]|None=None,
-    mode:Literal['bias',"whole",'non_ppi']='bias',
+    mode:Literal['bias',"whole",'non_ppi']='bias', # redundant: "whole",'non_ppi' should be treat as a certain type of bias
     mpnn_bias:Dict[str,np.ndarray]|None=None,
     max_mpnn_sequences:int=5,num_sample:int=30,seed:int=42,
     outdir:str|None=None,
@@ -202,23 +205,23 @@ def run_mpnn(
 
     # for design_id,bias in tqdm(mpnn_bias.items()):
     mpnn_model = mk_mpnn_model(**model_params)
-    for design_id,ptm_track in tqdm(ana_tracks.items()):
+    for design_id,ana_track in tqdm(ana_tracks.items()):
         if mode =='bias':
             bias=mpnn_bias.get(design_id,None)
             if bias is None:
-                continue
+                continue #weird: just skip those without bias? How about treat them as non-biased?
             # length=bias.shape[0]
             fix_po=np.where(bias[:,-1]==0)[0]
             fixed_positions = 'A,' + ','.join(f'B{i+1}' for i in fix_po)
         elif mode == 'non_ppi':
-            fix_po=np.where(ptm_track['ppi']==1)[0]
+            fix_po=np.where(ana_track['ppi']==1)[0]
             fixed_positions = 'A,' + ','.join(f'B{i+1}' for i in fix_po)
         elif mode == 'whole':
             fixed_positions = 'A' 
         else:
             raise ValueError
         
-        length=len(ptm_track['seq'])
+        length=len(ana_track['seq'])
         pdbfile=designid2pdb(design_id)
         if mode =='bias':
             mpnn_model.prep_inputs(pdbfile,'A,B',fix_pos=fixed_positions)
@@ -235,8 +238,8 @@ def run_mpnn(
         else:
             mpnn_df_=mpnn_df
         target_seq=mpnn_sequences['seq'][0].split('/')[0]
-        ori_score=mpnn_model.score(target_seq+ptm_track['seq'])['score']
-        mpnn_df_.loc[design_id]={'seq':ptm_track['seq'],'score':ori_score}
+        ori_score=mpnn_model.score(target_seq+ana_track['seq'])['score']
+        mpnn_df_.loc[design_id]={'seq':ana_track['seq'],'score':ori_score}
         mpnn_df_['design_id']=design_id
         mpnn_dfs.append(mpnn_df_)
     if len(mpnn_dfs)>0:

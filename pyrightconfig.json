@@ -37,18 +37,13 @@
         "train*/**",
         "*tar",
         "*pkl",
-        "setting*/"
+        "setting*/",
+        "ana/**",
+        "*md",
+        "*pkl",
+        ".*/**"
+        
       ],
-      // "reportPrivateImportUsage":"information",
-      // "reportAttributeAccessIssue":"information",
-      // "reportOptionalMemberAccess":"information",
-      // "reportIncompatibleMethodOverride":"information",
-      // "reportArgumentType":"information",
-      // "reportAssignmentType": "information",
-      // "reportReturnType": "information",
-      // "reportPossiblyUnboundVariable": "information",
-      // "reportCallIssue": "information",
-      // "reportOptionalSubscript": "information",
-      "typeCheckingMode": "off",
+      "typeCheckingMode": "off"
 
   }

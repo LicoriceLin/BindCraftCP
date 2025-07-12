@@ -96,6 +96,14 @@ def salt_bridge(pdbfile:str,inter_res:str)->Dict[str,pd.DataFrame]:
     bb_df_salt_bridges = pd.DataFrame(bb_salt_bridge_pairs, columns=["A_Res", "A_ID", "A_Ch", "B_Res", "B_ID", "B_Ch", "Dis"])
     return {'salt_AB':df_salt_bridges,'salt_BB':bb_df_salt_bridges}
 
+def ds_bond(pdbfile:str,chain:str='B'):
+    raise NotImplementedError
+    distance_cutoff=3.0
+    u = mda.Universe(pdbfile)
+    sgs=u.select_atoms(f"segid {chain} and name SG")
+    dist_matrix = distance_array(sgs.positions, sgs.positions)
+    
+
 def pi_stacking(pdbfile:str,inter_res:str)->Dict[str,pd.DataFrame]:
     raise NotImplementedError
 
