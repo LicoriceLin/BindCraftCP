@@ -19,7 +19,18 @@ class Hallucinate(BaseStep):
     
     @property
     def _default_metrics_prefix(self):
-        return 'halu-'
+        return 'halu:'
+    
+    @property
+    def metrics_to_add(self):
+        ret=[f'config:{i}' for i in ["helix",'length','seed']]
+        prefix=self.metrics_prefix
+        ret.extend([f'{prefix}pLDDT',f'{prefix}pTM',f'{prefix}i-pTM',f'{prefix}pAE',f'{prefix}i-pAE'])
+        return tuple(ret)
+    
+    @property
+    def pdb_to_add(self):
+        return tuple([self.metrics_prefix.strip(NEST_SEP)])
     
     def init_afdesign_model(
         self,
@@ -113,8 +124,8 @@ class Hallucinate(BaseStep):
         # metrics.update({"helix":af_model.opt["weights"]["helix"],'length':af_model._binder_len,'seed':self._current_design_seed})
         pdbstr=af_model.save_pdb()
         input.sequence=af_model.get_seq(get_best=False)[0]
-        input.pdb_strs.update({prefix.strip('-'):pdbstr})
-        input.metrics.update(metrics)
+        input.pdb_strs.update({prefix.strip(NEST_SEP):pdbstr})
+        input.update_metrics(metrics)
         return input
         # return DesignRecord(id=design_id,sequence=af_model.get_seq(get_best=False)[0],
         #         pdb_strs={prefix.strip('-'):pdbstr},metrics=metrics)
@@ -128,7 +139,8 @@ class Hallucinate(BaseStep):
     def process_record(self,input:DesignRecord)->DesignRecord:
         m=input.metrics
         prefix=self.metrics_prefix
-        self.config_afdesign_model(length=m['length'],seed=m['seed'],helicity_value=m['helix'])
+        self.config_afdesign_model(
+            length=m['length'],seed=m['seed'],helicity_value=m['helix'])
         record=self.sample_trajectory(input)
         self.purge_record(record,prefix)
         return record
@@ -157,8 +169,8 @@ class Hallucinate(BaseStep):
                 for helicity_value in binder_settings.helix_values:
                     design_id = binder_settings.binder_name+'-'+str(global_id).zfill(to_fill)
                     if design_id not in batch.records:
-                        record=DesignRecord(id=design_id,sequence='',
-                            metrics={"helix":helicity_value,'length':length,'seed':seed})
+                        record=DesignRecord(id=design_id,sequence='')
+                        record.update_metrics({"config:helix":helicity_value,'config:length':length,'config:seed':seed})
                         batch.add_record(self.process_record(record))
                         batch.save_record(design_id)
                     global_id+=1

@@ -20,29 +20,45 @@ class BaseStep(ABC):
         settings:GlobalSettings,**kwargs):
         self.settings=settings
         # initial prefix: adv[f'{self.name}-prefix'] > self._default_metrics_prefix
-        self.config_metrics_prefix() 
+        self.config_metrics_prefix()
 
     @property
     @abstractmethod
-    def name(self):
+    def name(self)->str:
         pass
 
     @property
     @abstractmethod
-    def _default_metrics_prefix(self):
+    def _default_metrics_prefix(self)->str:
         pass
 
+    @property
+    def metrics_to_add(self)->Tuple[str,...]:
+        return tuple([])
 
+    @property
+    def pdb_to_add(self)->Tuple[str,...]:
+        return tuple([])
+
+    @property
+    def track_to_add(self)->Tuple[str,...]:
+        return tuple([])
+    
     def check_processed(self,input: DesignRecord)->bool:
         '''
         default purge behavior:
             check if metrics_prefix.strip('-') in record.pdb_strs or pdb_files
         '''
-        pdb_key=self.metrics_prefix.strip('-')
-        if input.has_pdb(pdb_key):
-            return True
-        else:
-            return False
+        for i in self.metrics_prefix:
+            if not input.has_metric(i):
+                return False
+        for i in self.pdb_to_add:
+            if not input.has_pdb(i):
+                return False
+        for i in self.track_to_add:
+            if i not in input.ana_tracks:
+                return False
+        return True
         
     @abstractmethod
     def process_record(self, input: DesignRecord|None=None)->DesignRecord|None:
@@ -68,7 +84,7 @@ class BaseStep(ABC):
         default purge behavior:
             dump record.pdb_strs[metrics_prefix.strip('-')] to self.pdb_purge_dir if it exists
         '''
-        pdb_key=self.metrics_prefix.strip('-')
+        pdb_key=self.metrics_prefix.strip(NEST_SEP)
         if self.pdb_purge_dir is not None:
             record.purge_pdb(pdb_key,self.pdb_purge_dir/f'{record.id}.pdb')
 

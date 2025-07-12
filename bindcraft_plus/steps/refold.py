@@ -16,8 +16,16 @@ class Refold(BaseStep):
     def _default_metrics_prefix(self):
         return 'refold-'
     
-    def graft_full_target(self,record:DesignRecord):
-        raise NotImplementedError
+    @property
+    def metrics_to_add(self):
+        prefix=self.metrics_prefix
+        ret=[f'{prefix}multimer-{n+1}' for n in self.prediction_models]
+        ret.extend([f'{prefix}monomer-{n+1}' for n in self.prediction_models])
+        return tuple(ret)
+    
+    @property
+    def pdb_to_add(self):
+        return self.metrics_to_add
     
     def config_complex_model(self,record:DesignRecord):
         '''
@@ -63,14 +71,17 @@ class Refold(BaseStep):
         if getattr(m_model,'_binder_len',0) !=binder_len:
             m_model.prep_inputs(length=binder_len)
         
+    @property
+    def prediction_models(self):
+        return [0,1] if self.settings.adv['use_multimer_design'] else [0,1,2,3,4]
+    
     def refold(self,record:DesignRecord)->DesignRecord:
         prefix=self.metrics_prefix
         c_model,m_model=self.complex_prediction_model,self.binder_prediction_model
         binder_sequence=record.sequence
         advanced_settings,s=self.settings.adv,self.settings
-        prediction_models = [0,1] if advanced_settings['use_multimer_design'] else [0,1,2,3,4]
-
-        for model_num in prediction_models:
+        
+        for model_num in self.prediction_models:
             refold_id_c=f'{prefix}multimer-{model_num+1}'
             if refold_id_c not in record.metrics:
                 c_model.predict(seq=binder_sequence, models=[model_num], 
@@ -83,7 +94,7 @@ class Refold(BaseStep):
                      'i-pAE':'i_pae'}.items()}
                 record.metrics[refold_id_c]=metrics
             
-        for model_num in prediction_models:
+        for model_num in self.prediction_models:
             refold_id_m=f'{prefix}monomer-{model_num+1}'
             if refold_id_m not in metrics:
                 m_model.predict(models=[model_num], 
@@ -104,9 +115,7 @@ class Refold(BaseStep):
         '''
         if self.pdb_purge_dir is not None:
             prefix = self.metrics_prefix
-            advanced_settings,s=self.settings.adv,self.settings
-            prediction_models = [0,1] if advanced_settings['use_multimer_design'] else [0,1,2,3,4]
-            for model_num in prediction_models:
+            for model_num in self.prediction_models:
                 refold_id_c=f'{prefix}multimer-{model_num+1}'
                 if refold_id_c in record.pdb_strs:
                     record.purge_pdb(refold_id_c,
@@ -133,9 +142,8 @@ class Refold(BaseStep):
         return sorted(d,key=lambda k:d[k])
 
     def check_processed(self,input: DesignRecord)->bool:
-        prediction_models = [0,1] if self.settings.adv['use_multimer_design'] else [0,1,2,3,4]
         prefix=self.metrics_prefix
-        for model_num in prediction_models:
+        for model_num in self.prediction_models:
             refold_id_c=f'{prefix}multimer-{model_num+1}'
             if not input.has_pdb(refold_id_c):
                 return False
@@ -206,16 +214,22 @@ class Graft(BaseStep):
         self.graft_target=self.settings.target_settings.full_target_pdb
         self.graft_chain=self.settings.target_settings.full_target_chain
         self.ori_binder_chain=self.settings.target_settings.full_binder_chain
+
     @property
     def name(self):
         return 'graft'
     
     @property
     def _default_metrics_prefix(self):
-        return 'template-'
+        return 'template:'
     
+    @property
+    def pdb_to_add(self):
+        return tuple([self.metrics_prefix.strip(NEST_SEP)])
+
     def graft_binder(self,record:DesignRecord,):
         ori_key=self.settings.adv.get('graft-ori-key','halu')
+        prefix=self.metrics_prefix.strip(NEST_SEP)
         with tempfile.TemporaryDirectory() as tdir:
             if ori_key in record.pdb_files:
                 ori_pdb=record.pdb_files[ori_key]
@@ -228,7 +242,7 @@ class Graft(BaseStep):
             out_pdb=Path(tdir)/f'{record.id}.pdb'
             _graft_binder(ori_pdb,self.ori_binder_chain,
                 self.graft_target,self.graft_chain,out_pdb)
-            record.pdb_strs[self.metrics_prefix]=open(out_pdb,'r').read()
+            record.pdb_strs[prefix]=open(out_pdb,'r').read()
         return record
 
     def process_record(self,input: DesignRecord)->DesignRecord:
@@ -242,7 +256,7 @@ class Graft(BaseStep):
         '''
         advanced settings:
         graft-ori-key:str = 'halu'
-        graft-prefix:str  = 'template'
+        graft-prefix:str  = 'template:'
         '''
         self.config_pdb_purge(pdb_purge_stem)
         self.config_metrics_prefix(metrics_prefix)

@@ -1,10 +1,12 @@
 from abc import ABC
 from dataclasses import dataclass,asdict,MISSING
-from typing import List,Dict,Optional
+from typing import List,Dict,Optional,Any,Iterable
 from dataclasses import dataclass,field,fields
+from .utils import _iterate_set,_iterate_get,NEST_SEP
+
 import os,json
 PathT=os.PathLike[str]|None
-
+BasicDict=Dict[str,str|bool|int|float]
 @dataclass
 class BaseSettings(ABC):
     @property
@@ -21,7 +23,11 @@ class BaseSettings(ABC):
         for f in fields(cls):
             if f.init:
                 v=d.get(f.name,f.default)
-                assert v is not MISSING, f'{f.name} missing!'
+                if v is MISSING:
+                    if f.default_factory is not MISSING:
+                        v=f.default_factory()
+                    else:
+                        raise ValueError(f'{f.name} missing!')
                 d_[f.name]=v
         return cls(**d_)
 
@@ -30,14 +36,7 @@ class BaseSettings(ABC):
         with open(jsonfile,'r') as file:
             ori_dict:dict=json.load(file)
         return cls.from_dict(ori_dict)
-        # d={}
-        # for f in fields(cls):
-        #     v=ori_json.get(f.name,f.default)
-        #     assert v is not MISSING
-        #     d[f.name]=v
-        # return cls(**d)
-
-        
+    
 
 @dataclass
 class TargetSettings(BaseSettings):
@@ -59,8 +58,6 @@ class BinderSettings(BaseSettings):
     global_seed:int=42
 
 
-BasicDict=Dict[str,str|bool|int|float]
-
 @dataclass
 class AdvancedSettings(BaseSettings):
     advanced_paths:List[str] #sequentially override
@@ -79,19 +76,56 @@ class AdvancedSettings(BaseSettings):
     
 @dataclass
 class FilterSettings(BaseSettings): 
-    filters_path:str
-    _settings: dict = field(init=False, repr=False, default_factory=dict)
-    # TODO interface AA is a disaster
-    @property
-    def settings(self):
-        if not self._settings:
-            with open(self.filters_path, 'r') as file:
-                self._settings.update(json.load(file))
-        self._settings['filters_path']=self.filters_path
-        return self._settings
+    filters_path:Optional[str]=None
+    thresholds:dict = field(init=True, repr=True, default_factory=dict)
+    recipes:dict = field(init=True, repr=True, default_factory=dict)
+    '''
+    `threshold` `recipe` would override contents in `filters_path`
+    '''
     
-    def __getitem__(self,key):
-        return getattr(self,key)
+    def __post_init__(self):
+        if self.filters_path is not None:
+            load_json=json.load(open('self.filters_path','r'))
+            thresholds:dict=load_json.get('thresholds',{})
+            recipes:dict=load_json.get('recipe',{})
+            if self.thresholds:
+                thresholds.update(self.thresholds)
+                self.thresholds=thresholds
+            if self.recipes:
+                recipes.update(self.recipes)
+                self.recipes=recipes
+    
+    def recipe_threshold(self,recipe:str='all'):
+        '''
+        `recipe` == "all" or `recipe` in self.recipes
+        '''
+        if recipe == 'all':
+            return self._flatten_threshold(None)
+        else:
+            return self._flatten_threshold(self.recipes[recipe])
+            
+    def _flatten_threshold(self,subset:Iterable[str]|None)->Dict[str,Dict[str,Any]]:
+        if  subset is None:
+            return flatten_threshold(self.thresholds)
+        else:
+            ret = {}
+            for element in ['halu','refold-multimer-1:i-pAE']:
+                i=_iterate_get(self.thresholds,element)
+                if 'higher' in i:
+                    ret[element]=i
+                else:
+                    ret.update(flatten_threshold(i))
+            return ret
+
+def flatten_threshold(d:Dict[str,Any], parent_key=''):
+    items = {}
+    for k, v in d.items():
+        new_key = f"{parent_key}{NEST_SEP}{k}" if parent_key else str(k)
+        if isinstance(v, dict) and 'higher' not in v:
+            items.update(flatten_threshold(v, new_key))
+        else:
+            items[new_key] = v
+    return items
 
 @dataclass
 class GlobalSettings(BaseSettings):

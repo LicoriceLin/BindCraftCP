@@ -1,10 +1,12 @@
 from abc import ABC,abstractmethod
 from dataclasses import dataclass,asdict,MISSING
-from typing import List,Dict,Any,Optional
+from typing import List,Dict,Any,Optional,Iterable,Tuple,Callable
 from dataclasses import dataclass,field
 import os,json
 import pandas as pd
 from pathlib import Path
+from .utils import NEST_SEP, _iterate_get, _iterate_set
+
 PathT=os.PathLike[str]|None
 
 @dataclass
@@ -57,13 +59,53 @@ class DesignRecord:
         else:
             return False
 
+    def get_metrics(self,key:str|Tuple[str,...]):
+        f'''
+        key: 
+        common str      : self.metrics[key]:
+        str with {NEST_SEP}    : split into tuple
+        tuple           : self.metrics[k1][k2][...]
+        '''
+        return _iterate_get(self.metrics,key)
+        # if isinstance(key,str) and NEST_SEP in key:
+        #     key=tuple(key.split(NEST_SEP))
+        # if isinstance(key,str):
+        #     return self.metrics[key]
+        # elif isinstance(key,tuple):
+        #     return _iterate_get(self.metrics,key)
+        # else:
+        #     raise ValueError
+        
+    def set_metrics(self,key:str|Tuple[str,...],value:Any):
+        return _iterate_set(self.metrics,key,value)
+        # if isinstance(key,str) and NEST_SEP in key:
+        #     key=tuple(key.split(NEST_SEP))
+        # if isinstance(key,str):
+        #     self.metrics[key]=value
+        # elif isinstance(key,tuple):
+        #     return _iterate_set(self.metrics,key,value)
+        # else:
+        #     raise ValueError
+ 
+    def has_metric(self,key:str|Tuple[str,...]):
+        try:
+            self.get_metrics(key)
+            return True
+        except:
+            return False
+        
+    def update_metrics(self,metrics:Dict[str|Tuple[str,...],Any]):
+        for k,v in metrics.values():
+            self.set_metrics(k,v)
+
 class DesignBatch:
     cache_dir:Path
     records:Dict[str,DesignRecord]
     overwrite:bool=False
+    metrics: Dict[str,Any]={}
     '''
-    Overwrite=False: Cache > Batch > Record,
-             =True : Cache < Batch < Record
+    Overwrite=False: Cache > Batch > New,
+             =True : Cache < Batch < New
     '''
     def __init__(self, cache_dir:PathT, overwrite:bool=False):
         self.set_cache_dir(cache_dir)
@@ -85,7 +127,7 @@ class DesignBatch:
     def set_cache_dir(self,cache_dir:PathT):
         self.cache_dir=self._fetch_cache_dir(cache_dir)
 
-    def load_records(self,cache_dir:PathT=None):
+    def load_records(self,cache_dir:Optional[PathT]=None):
         cache_dir=self._fetch_cache_dir(cache_dir)
         for i in self.cache_dir.iterdir():
             if i.suffix=='.json':
@@ -109,9 +151,14 @@ class DesignBatch:
     def from_cache(cls,cache_dir:PathT):
         ret=cls(cache_dir,overwrite=False)
         ret.load_records()
+        return ret
 
     def log(self,logs:Dict[str,Any]):
-        self.metrics.update(logs)
+        if self.overwrite:
+            self.metrics.update(logs)
+        else:
+            logs.update(self.metrics)
+            self.metrics=logs
 
     def add_record(self,record:DesignRecord):
         if not self.overwrite:
@@ -129,16 +176,119 @@ class DesignBatch:
         cache_dir=self._fetch_cache_dir(cache_dir)
         for k,v in self.records.items():
             self.save_record(k,cache_dir)
+        self.save_log()
 
-    def df(self,metrics:List[str]):
+    def save_log(self):
+        if not self.overwrite:
+            if self.log_json.exists():
+                prev_log=json.load(open(self.log_json,'r'))
+                for i in self.metrics:
+                    if i in prev_log:
+                        raise ValueError(f'not in overwrite mode but metrics {i} exists')
+        with open(self.log_json,'w') as f:
+            json.dump(self.metrics,f,indent=2)
+        
+    def df(self,metrics:Iterable[str|Tuple[str,...]]):
         ret=pd.DataFrame(index=self.records.keys())
         for metric in metrics:
-            ret[metric]={k:v.metrics[metric] for k,v in self.records.items()}
+            if isinstance(metric,tuple):
+                k=NEST_SEP.join(metric)
+            ret[k]={k:v.get_metrics(metric) for k,v in self.records.items()}
         return ret
+    
+    @property
+    def log_json(self):
+        return self.cache_dir/'metrics.json'
 
-    def __getitem__(self,key:str):
-        return self.records[key]
-
+    def __getitem__(self,key:str|Iterable[str]):
+        if isinstance(key,str):
+            return self.records[key]
+        else:
+            return DesignBatchSlice(self,key)
+        
     def __len__(self):
         return len(self.records)
     
+    def select_record(self,select_fn:Callable[[DesignRecord],bool])->List[str]:
+        ret = []
+        for design_id,record in self.records.items():
+            if select_fn(record):
+                ret.append(design_id)
+        return ret
+
+    def filter(self,select_fn:Callable[[DesignRecord],bool],
+            new_log_stem:Optional[str]=None)->'DesignBatchSlice':
+        record_ids=self.select_record(select_fn)
+        ret:DesignBatchSlice=self[record_ids]
+        ret.set_log_stem(new_log_stem)
+        return ret
+
+
+
+class DesignBatchSlice(DesignBatch):
+    '''
+    a shallow copy of DesignBatch subset,
+    purpose:
+        choose a subset for further process 
+        maybe more scores/conformation will be added, for example, in scorer
+        maybe more designs will be added, for example, in MPNN
+        maybe just for analysis. In this case, `log_json` could be different.
+
+    inherit cache_dir, records(subset), metrics,
+    can not be loaded from cache_dir
+
+    overwrite & cache_dir: always same as its parent
+    '''
+    def __init__(self, parent:DesignBatch,
+        record_ids:Iterable[str],log_stem:str|None=None):
+        if isinstance(parent,DesignBatchSlice):
+            self.parent = parent.parent
+        else:
+            self.parent = parent
+        self.metrics = {}
+        self.records={i:parent.records[i] for i in record_ids}
+        self.set_log_stem(log_stem)
+
+    def add_record(self,record:DesignRecord):
+        self.parent.add_record(record)
+        super().add_record(record)
+
+    def set_log_stem(self,log_stem:str|None=None):
+        self._log_stem=log_stem    
+    
+    def push_log(self):
+        self.parent.metrics.update(self.metrics)
+
+    def pull_log(self):
+        self.metrics.update(self.parent.metrics)
+
+    @property
+    def log_json(self):
+        if self._log_stem is None:
+            return self.parent.log_json
+        else:
+            return self.cache_dir/f'{self._log_stem}.json'
+
+    @property
+    def overwrite(self):
+        return self.parent.overwrite
+    
+    @property
+    def cache_dir(self):
+        return self.parent.cache_dir
+    
+    ### inhibited methods
+    def load_records(self,cache_dir):
+        raise NotImplementedError("This is a Slice. Don't load to it.")
+    
+    @classmethod
+    def from_cache(cls,cache_dir):
+         raise NotImplementedError("This is a Slice. Don't load to it.")
+    
+    def set_cache_dir(self, cache_dir):
+        raise NotImplementedError("This is a Slice. Set on its parent.")
+
+    def set_overwrite(self, overwrite):
+        raise NotImplementedError("This is a Slice. Set on its parent.")
+    
+
