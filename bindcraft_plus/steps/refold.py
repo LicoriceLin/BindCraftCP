@@ -2,19 +2,17 @@ from .basestep import *
 from colabdesign import mk_afdesign_model
 from pymol import cmd
 import tempfile
+from string import ascii_uppercase
 
 class Refold(BaseStep):
     def __init__(self,settings:GlobalSettings):
-        super().__init__(settings)
         self.templated=settings.adv.get('templated',False)
+        super().__init__(settings)
+        
     
     @property
     def name(self):
         return 'refold'
-    
-    @property
-    def _default_metrics_prefix(self):
-        return 'refold-'
     
     @property
     def metrics_to_add(self):
@@ -27,6 +25,13 @@ class Refold(BaseStep):
     def pdb_to_add(self):
         return self.metrics_to_add
     
+    def config_pdb_input_key(self, pdb_to_take = None):
+        if pdb_to_take is None:
+            default='template' if self.templated else 'halu'
+            self._pdb_to_take=self.settings.adv.get('template-pdb-key',default)
+        else:
+            self._pdb_to_take=pdb_to_take
+    
     def config_complex_model(self,record:DesignRecord):
         '''
         '''
@@ -34,12 +39,11 @@ class Refold(BaseStep):
         advanced_settings,s=self.settings.adv,self.settings
         binder_len=len(record.sequence)
         if self.templated:
-            template_pdb_key=advanced_settings.get('template-pdb-key','graft')
             try:
-                template_pdb=record.pdb_files[template_pdb_key]
+                template_pdb=record.pdb_files[self.pdb_to_take]
             except:
                 raise ValueError(
-                    f'template-pdb-key `{template_pdb_key}` '
+                    f'template-pdb-key `{self.pdb_to_take}` '
                     'not found in `record.pdb_files`')
             
             if getattr(self,'current_template_pdb','')!=template_pdb:
@@ -47,7 +51,7 @@ class Refold(BaseStep):
                 c_model.prep_inputs(
                     pdb_filename=template_pdb, 
                     chain=s.target_settings.full_target_chain, 
-                    binder_chain=s.target_settings.full_binder_chain, 
+                    binder_chain=s.target_settings.new_binder_chain, 
                     binder_len=binder_len, 
                     use_binder_template=True, 
                     rm_target_seq=advanced_settings["rm_template_seq_predict"],
@@ -88,11 +92,11 @@ class Refold(BaseStep):
                     num_recycles=advanced_settings["num_recycles_validation"], 
                     verbose=False,seed=s.binder_settings.global_seed)
                 record.pdb_strs[refold_id_c]=c_model.save_pdb(None,get_best=False)
-                metrics={k:c_model.aux['log'][v] for k,v in 
+                metrics={refold_id_c+':'+k:c_model.aux['log'][v] for k,v in 
                     {'pLDDT':'plddt','pTM':'ptm',
                      'i-pTM':'i_ptm','pAE':'pae',
                      'i-pAE':'i_pae'}.items()}
-                record.metrics[refold_id_c]=metrics
+                record.update_metrics(metrics)
             
         for model_num in self.prediction_models:
             refold_id_m=f'{prefix}monomer-{model_num+1}'
@@ -101,10 +105,10 @@ class Refold(BaseStep):
                     num_recycles=advanced_settings["num_recycles_validation"], verbose=False,
                     seed=s.binder_settings.global_seed)
                 record.pdb_strs[refold_id_m]=c_model.save_pdb(None,get_best=False)
-                metrics={k:m_model.aux['log'][v] for k,v in 
+                metrics={refold_id_m+':'+k:m_model.aux['log'][v] for k,v in 
                     {'pLDDT':'plddt','pTM':'ptm',
                      'pAE':'pae'}.items()}
-                record.metrics[refold_id_m]=metrics
+                record.update_metrics(metrics)
         
         return record
     
@@ -153,11 +157,10 @@ class Refold(BaseStep):
         return True
     
     def process_record(self, input: DesignRecord)->DesignRecord:
-        if not self.check_processed(input):
+        with self.record_time(input):
             self.config_complex_model(input)
             self.config_monomer_model(input)
             self.refold(input)
-            self.purge_record(input)
         return input    
     
     def process_batch(self, input:DesignBatch,
@@ -178,8 +181,10 @@ class Refold(BaseStep):
         self.config_pdb_purge(pdb_purge_stem)
         self.config_metrics_prefix(metrics_prefix)
         for design_id in self.sort_batch(input):
-            self.process_record(input.records[design_id])
-            input.save_record(design_id)
+            if not self.check_processed(input.records[design_id]):
+                self.process_record(input.records[design_id])
+                self.purge_record(input)
+                input.save_record(design_id)
         return input
 
         # return super().__call__(input)
@@ -214,7 +219,7 @@ class Graft(BaseStep):
         self.graft_target=self.settings.target_settings.full_target_pdb
         self.graft_chain=self.settings.target_settings.full_target_chain
         self.ori_binder_chain=self.settings.target_settings.full_binder_chain
-
+        self.new_binder_chain=self.settings.target_settings.new_binder_chain
     @property
     def name(self):
         return 'graft'
@@ -226,9 +231,15 @@ class Graft(BaseStep):
     @property
     def pdb_to_add(self):
         return tuple([self.metrics_prefix.strip(NEST_SEP)])
+    
+    def config_pdb_input_key(self, pdb_to_take = None):
+        if pdb_to_take is None:
+            self._pdb_to_take=self.settings.adv.get('graft-ori-key','halu')
+        else:
+            self._pdb_to_take=pdb_to_take
 
     def graft_binder(self,record:DesignRecord,):
-        ori_key=self.settings.adv.get('graft-ori-key','halu')
+        ori_key=self.pdb_to_take
         prefix=self.metrics_prefix.strip(NEST_SEP)
         with tempfile.TemporaryDirectory() as tdir:
             if ori_key in record.pdb_files:
@@ -240,40 +251,28 @@ class Graft(BaseStep):
                 raise ValueError(f'no ori_pdb_key: {ori_key}')
             
             out_pdb=Path(tdir)/f'{record.id}.pdb'
-            _graft_binder(ori_pdb,self.ori_binder_chain,
-                self.graft_target,self.graft_chain,out_pdb)
+            self.new_graft_chain=_graft_binder(ori_pdb,self.ori_binder_chain,
+                self.graft_target,self.graft_chain,out_pdb,self.new_binder_chain)
             record.pdb_strs[prefix]=open(out_pdb,'r').read()
         return record
 
     def process_record(self,input: DesignRecord)->DesignRecord:
-        if not self.check_processed(input):
-            self.graft_binder(input)
-            self.purge_record(input)
+        self.graft_binder(input)
+        # self.purge_record(input)
         return input
 
-    def process_batch(self, input:DesignBatch, 
-        pdb_purge_stem:Optional[str]=None,metrics_prefix:str|None=None):
-        '''
-        advanced settings:
-        graft-ori-key:str = 'halu'
-        graft-prefix:str  = 'template:'
-        '''
-        self.config_pdb_purge(pdb_purge_stem)
-        self.config_metrics_prefix(metrics_prefix)
-        for records_id,record in input.records.items():
-            self.process_record(record)
-            input.save_record(records_id)
-        return input
-    
-        # return super().__call__(input)
                      
-def _graft_binder(ori_pdb:str,ori_binder_chain:str, graft_target:str,graft_chain:str,out_pdb:str):
+def _graft_binder(ori_pdb:str,ori_binder_chain:str,
+    graft_target:str,graft_chain:str,out_pdb:str,new_binder_chain:str):
     '''
     make sure traj/rescore pdb are pre-aligned.
     '''
     cmd.load(ori_pdb,'ori_pdb')
     cmd.load(graft_target,'graft_pdb')
-    cmd.select('to_write',f" (ori_pdb and (chain {ori_binder_chain})) or (graft_pdb and (chain {graft_chain}))")
+    if new_binder_chain != ori_binder_chain:
+        cmd.alter(f'ori_pdb and chain {ori_binder_chain}',f'chain="{new_binder_chain}"')
+    cmd.create('to_write',f" (ori_pdb and (chain {new_binder_chain})) or (graft_pdb and (chain {graft_chain}))")
     cmd.save(out_pdb,'to_write')
     cmd.delete('ori_pdb')
-    cmd.delete('rescorepdb')
+    cmd.delete('graft_pdb')
+    cmd.delete('to_write')

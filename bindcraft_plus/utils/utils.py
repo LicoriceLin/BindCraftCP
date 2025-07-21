@@ -1,4 +1,4 @@
-from typing import Tuple,Any,Dict,Callable
+from typing import Tuple,Any,Dict,Callable,Any
 NEST_SEP=':'
 def _iterate_get(d:dict,keys:str|Tuple[str,...],sep:str=NEST_SEP):
     if isinstance(keys,str):
@@ -6,6 +6,26 @@ def _iterate_get(d:dict,keys:str|Tuple[str,...],sep:str=NEST_SEP):
     for k in keys:
         d=d[k]
     return d
+
+def _iterate_get_safe(d:dict,keys:str|Tuple[str,...],default:Any=NotImplemented,sep:str=NEST_SEP):
+    if isinstance(keys,str):
+        keys=keys.split(sep)
+    for k in keys:
+        if k in d:
+            d=d[k]
+        else:
+            return default
+    return d
+
+def _iterate_in(d:dict,keys:str|Tuple[str,...],sep:str=NEST_SEP):
+    if isinstance(keys,str):
+        keys=keys.split(sep)
+    for k in keys:
+        if k in d:
+            d=d[k]
+        else:
+            return False
+    return True
 
 def _iterate_set(d:dict,keys:str|Tuple[str,...],v:Any,sep:str=NEST_SEP):
     if isinstance(keys,str):

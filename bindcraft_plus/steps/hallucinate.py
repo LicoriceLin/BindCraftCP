@@ -19,7 +19,7 @@ class Hallucinate(BaseStep):
     
     @property
     def _default_metrics_prefix(self):
-        return 'halu:'
+        return f'halu{NEST_SEP}'
     
     @property
     def metrics_to_add(self):
@@ -50,6 +50,7 @@ class Hallucinate(BaseStep):
     def config_afdesign_model(self,length:int,seed:int,helicity_value:float):
         advanced_settings=self.settings.adv
         target_settings=self.settings.target_settings
+        rm_aa = advanced_settings["omit_AAs"] if advanced_settings["omit_AAs"] else None
         af_model=self.af_model
         af_model.prep_inputs(
             pdb_filename=target_settings.starting_pdb, 
@@ -57,7 +58,7 @@ class Hallucinate(BaseStep):
             binder_len=length, 
             hotspot=target_settings.target_hotspot_residues, 
             seed=seed, 
-            rm_aa=advanced_settings["omit_AAs"],
+            rm_aa=rm_aa,
             rm_target_seq=advanced_settings["rm_template_seq_design"], 
             rm_target_sc=advanced_settings["rm_template_sc_design"])
         self._current_design_seed=seed
@@ -75,13 +76,13 @@ class Hallucinate(BaseStep):
         af_model.opt["i_con"].update({"num":advanced_settings["inter_contact_number"],"cutoff":advanced_settings["inter_contact_distance"],"binary":False})
 
         ### additional loss functions
-        if advanced_settings["use_rg_loss"]:
+        if advanced_settings.get("use_rg_loss",False):
             add_rg_loss(af_model, advanced_settings["weights_rg"])
 
-        if advanced_settings["use_i_ptm_loss"]:
+        if advanced_settings.get("use_i_ptm_loss",False):
             add_i_ptm_loss(af_model, advanced_settings["weights_iptm"])
 
-        if advanced_settings["use_termini_distance_loss"]:
+        if advanced_settings.get("use_termini_distance_loss",False):
             add_termini_distance_loss(af_model, advanced_settings["weights_termini_loss"])
         add_helix_loss(af_model, helicity_value)
 
@@ -93,6 +94,8 @@ class Hallucinate(BaseStep):
         verb=advanced_settings.get('verb',1)
         # af_model.design_logits(iters=50, e_soft=0.9, models=design_models,
         #      num_models=1, sample_models=advanced_settings["sample_models"], save_best=True)
+        if verb: 
+            print("Running SGD-based hallucination...")
         af_model.design_logits(iters=advanced_settings["soft_iterations"], e_soft=1, models=design_models, num_models=1, sample_models=advanced_settings["sample_models"],
             ramp_recycles=False, save_best=True,verbose=verb)
         af_model.design_soft(advanced_settings["temporary_iterations"], e_temp=1e-2, models=design_models, num_models=1,
@@ -137,19 +140,18 @@ class Hallucinate(BaseStep):
         raise NotImplementedError
     
     def process_record(self,input:DesignRecord)->DesignRecord:
-        m=input.metrics
-        prefix=self.metrics_prefix
-        self.config_afdesign_model(
-            length=m['length'],seed=m['seed'],helicity_value=m['helix'])
-        record=self.sample_trajectory(input)
-        self.purge_record(record,prefix)
+        with self.record_time(input):
+            m=input.metrics
+            self.config_afdesign_model(
+                length=m['config']['length'],seed=m['config']['seed'],helicity_value=m['config']['helix'])
+            record=self.sample_trajectory(input)
         return record
 
     def process_batch(self,
         batch_cache_stem:str='metrics',
         pdb_purge_stem:Optional[str]=None,
         metrics_prefix:str|None=None, 
-        input=None)->DesignBatch:
+        overwrite:bool=False,input=None)->DesignBatch:
         '''
         cache_stem: path to cache output `DesignBatch`
         pdb_purge_stem: None: save with batch; else: purge pdb to this dir
@@ -159,7 +161,9 @@ class Hallucinate(BaseStep):
         self.config_metrics_prefix(metrics_prefix)
         binder_settings=self.settings.binder_settings
         batch=DesignBatch(Path(binder_settings.design_path)/batch_cache_stem)
-        batch.load_records()
+        batch.set_overwrite(overwrite)
+        if not overwrite:
+            batch.load_records()
 
         global_id=0
         tot=len(binder_settings.binder_lengths)*len(binder_settings.random_seeds)*len(binder_settings.helix_values)
@@ -168,10 +172,11 @@ class Hallucinate(BaseStep):
             for seed in binder_settings.random_seeds:
                 for helicity_value in binder_settings.helix_values:
                     design_id = binder_settings.binder_name+'-'+str(global_id).zfill(to_fill)
-                    if design_id not in batch.records:
+                    if batch.overwrite or design_id not in batch.records:
                         record=DesignRecord(id=design_id,sequence='')
                         record.update_metrics({"config:helix":helicity_value,'config:length':length,'config:seed':seed})
                         batch.add_record(self.process_record(record))
+                        self.purge_record(record)
                         batch.save_record(design_id)
                     global_id+=1
         return batch

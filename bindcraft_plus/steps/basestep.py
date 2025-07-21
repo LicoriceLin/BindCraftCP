@@ -2,6 +2,8 @@ from abc import ABC,abstractmethod
 from colabdesign import mk_afdesign_model
 import os
 from pathlib import Path
+from time import perf_counter
+from contextlib import contextmanager
 PathT=os.PathLike[str]|None
 
 from ..utils import *
@@ -11,26 +13,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List,Dict,Tuple,Optional
 
-# from .biopython_utils import hotspot_residues, calculate_clash_score, calc_ss_percentage, calculate_percentages,target_pdb_rmsd,three_to_one_map
-# from .pyrosetta_utils import pr_relax, align_pdbs,unaligned_rmsd,score_interface
-# from .generic_utils import update_failures,BasicDict,backup_if_exists,backuppdb_if_multiframe
-
 class BaseStep(ABC):
     def __init__(self,
         settings:GlobalSettings,**kwargs):
         self.settings=settings
         # initial prefix: adv[f'{self.name}-prefix'] > self._default_metrics_prefix
         self.config_metrics_prefix()
-
+        self.config_pdb_input_key()
+        self.config_pdb_purge()
+        
     @property
     @abstractmethod
     def name(self)->str:
         pass
 
     @property
-    @abstractmethod
     def _default_metrics_prefix(self)->str:
-        pass
+        return f'{self.name}{NEST_SEP}'
 
     @property
     def metrics_to_add(self)->Tuple[str,...]:
@@ -39,7 +38,15 @@ class BaseStep(ABC):
     @property
     def pdb_to_add(self)->Tuple[str,...]:
         return tuple([])
-
+    
+    @property
+    def pdb_to_take(self)->str:
+        '''
+        scorer's input pdb is frequently changed.
+        use `self.set_input_key` to reconfigure it.
+        '''
+        return self._pdb_to_take
+    
     @property
     def track_to_add(self)->Tuple[str,...]:
         return tuple([])
@@ -47,9 +54,10 @@ class BaseStep(ABC):
     def check_processed(self,input: DesignRecord)->bool:
         '''
         default purge behavior:
-            check if metrics_prefix.strip('-') in record.pdb_strs or pdb_files
+            check if all keys in {metrics,pdb,track}_to_add 
+                can be find in records.
         '''
-        for i in self.metrics_prefix:
+        for i in self.metrics_to_add:
             if not input.has_metric(i):
                 return False
         for i in self.pdb_to_add:
@@ -63,35 +71,55 @@ class BaseStep(ABC):
     @abstractmethod
     def process_record(self, input: DesignRecord|None=None)->DesignRecord|None:
         '''
-        Don't purge output pdb here!
+        in-memory method to deal with Record.
+        DON'T generate permanent files here.
         '''
         pass
 
-    @abstractmethod
     def process_batch(self, 
         input: DesignBatch|None=None,
         pdb_purge_stem:Optional[str]=None,
         metrics_prefix:str|None=None
         )->DesignBatch|None:
         '''
+        Main interface for this step.
+        expected operations here:
+        Config:
+            metrics_prefix: prefix in keys to save pdb/metrics
+            pdb_purge_stem: path to dump pdbs
+        IO:
+            check check_processed / forced overwrite
+            Save records / batch metrics 
+            Purge pdb.
+        Batch level operation:
+            sort, filter(in Filter subclass), post-analysis.
         '''
         self.config_pdb_purge(pdb_purge_stem)
         self.config_metrics_prefix(metrics_prefix)
+        for records_id,record in input.records.items():
+            if input.overwrite or not self.check_processed(record):
+                self.process_record(record)
+                self.purge_record(input)
+                input.save_record(records_id)
         return input
     
     def purge_record(self,record:DesignRecord):
         '''
         default purge behavior:
-            dump record.pdb_strs[metrics_prefix.strip('-')] to self.pdb_purge_dir if it exists
+            if self.pdb_purge_dir not None:
+                dump record.pdb_strs[key in `self.pdb_to_add`] to it. 
         '''
-        pdb_key=self.metrics_prefix.strip(NEST_SEP)
+        # pdb_key=self.metrics_prefix.strip(NEST_SEP)
         if self.pdb_purge_dir is not None:
-            record.purge_pdb(pdb_key,self.pdb_purge_dir/f'{record.id}.pdb')
+            for pdb_key in self.pdb_to_add:
+                record.purge_pdb(pdb_key,self.pdb_purge_dir/f'{record.id}.pdb')
 
     def config_pdb_purge(self,pdb_purge_stem:Optional[str]=None):
         '''
         default behavior:
             if pdb_purge_stem is not None, create it and set it to `pdb_purge_dir`
+                generated pdb will be dumped into this dir.
+            otherwise, generated pdb will be saved in record.
         '''
         if pdb_purge_stem is not None:
             pdb_purge_dir=Path(self.settings.binder_settings.design_path)/pdb_purge_stem
@@ -109,8 +137,32 @@ class BaseStep(ABC):
         else:
             self.metrics_prefix=self.settings.adv.get(
                 f'{self.name}-prefix',self._default_metrics_prefix)
+    
+    def config_pdb_input_key(self,pdb_to_take:str|None=None):
+        '''
+        recommend behavior:
+        value in params > value in settings > default value
+        Note: 
+        this config method is not integrated in process_batch.
+        '''
+        if pdb_to_take is None:
+            self._pdb_to_take=''
+        else:
+            self._pdb_to_take=pdb_to_take
 
-
+    @contextmanager
+    def record_time(self,record:DesignRecord,time_key:Optional[str]=None):
+        '''
+        default time_key: 
+            f'time{NEST_SEP}{self.metrics_prefix.strip(NEST_SEP)}'
+        '''
+        if time_key is None:
+            time_key=f'time{NEST_SEP}{self.metrics_prefix.strip(NEST_SEP)}'
+        start = perf_counter()
+        record.set_metrics(time_key,start)
+        yield None  
+        start=record.get_metrics(time_key)
+        record.set_metrics(time_key,perf_counter() - start)
 
 def add_cyclic_offset(self:mk_afdesign_model, offset_type=2):
     '''add cyclic offset to connect N and C term'''

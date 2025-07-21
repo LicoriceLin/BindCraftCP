@@ -3,8 +3,9 @@ from dataclasses import dataclass,asdict,MISSING
 from typing import List,Dict,Optional,Any,Iterable
 from dataclasses import dataclass,field,fields
 from .utils import _iterate_set,_iterate_get,NEST_SEP
-
+from string import ascii_uppercase
 import os,json
+
 PathT=os.PathLike[str]|None
 BasicDict=Dict[str,str|bool|int|float]
 @dataclass
@@ -46,6 +47,17 @@ class TargetSettings(BaseSettings):
     full_target_pdb:Optional[str]=None
     full_target_chain:Optional[str]=None
     full_binder_chain:str='B'
+    new_binder_chain:str=field(repr=False,init=False,default='')
+    def __post_init__(self):
+        if (self.full_target_chain is not None 
+            and self.full_binder_chain in self.full_target_chain):
+            for i in ascii_uppercase:
+                if i !='A' and i!= self.full_target_chain and i not in self.full_binder_chain.split(','):
+                    self.new_binder_chain=i
+                    break
+        else:
+            self.full_target_chain='A' # default output from colabdesign.
+            self.new_binder_chain=self.full_binder_chain
 
 
 @dataclass
@@ -85,15 +97,15 @@ class FilterSettings(BaseSettings):
     
     def __post_init__(self):
         if self.filters_path is not None:
-            load_json=json.load(open('self.filters_path','r'))
+            load_json=json.load(open(self.filters_path,'r'))
             thresholds:dict=load_json.get('thresholds',{})
-            recipes:dict=load_json.get('recipe',{})
+            recipes:dict=load_json.get('recipes',{})
             if self.thresholds:
                 thresholds.update(self.thresholds)
-                self.thresholds=thresholds
+            self.thresholds=thresholds
             if self.recipes:
                 recipes.update(self.recipes)
-                self.recipes=recipes
+            self.recipes=recipes
     
     def recipe_threshold(self,recipe:str='all'):
         '''
@@ -109,13 +121,13 @@ class FilterSettings(BaseSettings):
             return flatten_threshold(self.thresholds)
         else:
             ret = {}
-            for element in ['halu','refold-multimer-1:i-pAE']:
+            for element in subset:
                 i=_iterate_get(self.thresholds,element)
-                if 'higher' in i:
-                    ret[element]=i
-                else:
-                    ret.update(flatten_threshold(i))
-            return ret
+                # if 'higher' in i:
+                ret[element]=i
+                # else:
+                #     ret.update(flatten_threshold(i))
+            return flatten_threshold(ret)
 
 def flatten_threshold(d:Dict[str,Any], parent_key=''):
     items = {}

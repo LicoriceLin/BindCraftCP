@@ -5,7 +5,7 @@ from dataclasses import dataclass,field
 import os,json
 import pandas as pd
 from pathlib import Path
-from .utils import NEST_SEP, _iterate_get, _iterate_set
+from .utils import NEST_SEP, _iterate_get, _iterate_set,_iterate_in,_iterate_get_safe
 
 PathT=os.PathLike[str]|None
 
@@ -59,43 +59,23 @@ class DesignRecord:
         else:
             return False
 
-    def get_metrics(self,key:str|Tuple[str,...]):
+    def get_metrics(self,key:str|Tuple[str,...],default:Any=None):
         f'''
         key: 
         common str      : self.metrics[key]:
         str with {NEST_SEP}    : split into tuple
         tuple           : self.metrics[k1][k2][...]
         '''
-        return _iterate_get(self.metrics,key)
-        # if isinstance(key,str) and NEST_SEP in key:
-        #     key=tuple(key.split(NEST_SEP))
-        # if isinstance(key,str):
-        #     return self.metrics[key]
-        # elif isinstance(key,tuple):
-        #     return _iterate_get(self.metrics,key)
-        # else:
-        #     raise ValueError
+        return _iterate_get_safe(self.metrics,key,default=default)
         
     def set_metrics(self,key:str|Tuple[str,...],value:Any):
         return _iterate_set(self.metrics,key,value)
-        # if isinstance(key,str) and NEST_SEP in key:
-        #     key=tuple(key.split(NEST_SEP))
-        # if isinstance(key,str):
-        #     self.metrics[key]=value
-        # elif isinstance(key,tuple):
-        #     return _iterate_set(self.metrics,key,value)
-        # else:
-        #     raise ValueError
  
     def has_metric(self,key:str|Tuple[str,...]):
-        try:
-            self.get_metrics(key)
-            return True
-        except:
-            return False
+        return _iterate_in(self.metrics,key)
         
     def update_metrics(self,metrics:Dict[str|Tuple[str,...],Any]):
-        for k,v in metrics.values():
+        for k,v in metrics.items():
             self.set_metrics(k,v)
 
 class DesignBatch:
@@ -191,9 +171,7 @@ class DesignBatch:
     def df(self,metrics:Iterable[str|Tuple[str,...]]):
         ret=pd.DataFrame(index=self.records.keys())
         for metric in metrics:
-            if isinstance(metric,tuple):
-                k=NEST_SEP.join(metric)
-            ret[k]={k:v.get_metrics(metric) for k,v in self.records.items()}
+            ret[metric]={k:v.get_metrics(metric) for k,v in self.records.items()}
         return ret
     
     @property
@@ -209,6 +187,9 @@ class DesignBatch:
     def __len__(self):
         return len(self.records)
     
+    def keys(self):
+        return self.records.keys()
+
     def select_record(self,select_fn:Callable[[DesignRecord],bool])->List[str]:
         ret = []
         for design_id,record in self.records.items():

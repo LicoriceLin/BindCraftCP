@@ -7,28 +7,27 @@
       },
       "i-pAE": {
         "threshold": 0.35,
-        "higher": true
+        "higher": false
       }
     },
-    "refold-multimer-1": {
+    "refold":{"multimer-1": {
       "pLDDT": {
         "threshold": 0.8,
         "higher": true
       },
       "i-pAE": {
         "threshold": 0.35,
-        "higher": true
-      }
-    },
-    "refold-multimer-2": {
+        "higher": false
+      }},
+      "multimer-2": {
       "pLDDT": {
         "threshold": 0.8,
         "higher": true
       },
       "i-pAE": {
         "threshold": 0.35,
-        "higher": true
-      }
+        "higher": false
+      }}
     }
   },
   "recipes": {
@@ -36,8 +35,8 @@
       "halu"
     ],
     "after:refold": [
-      "refold-multimer-1",
-      "refold-multimer-2"
+      "refold:multimer-1",
+      "refold:multimer-2"
     ]
   }
 }
