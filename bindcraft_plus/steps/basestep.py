@@ -53,9 +53,11 @@ class BaseStep(ABC):
     
     def check_processed(self,input: DesignRecord)->bool:
         '''
-        default purge behavior:
-            check if all keys in {metrics,pdb,track}_to_add 
-                can be find in records.
+        default check behavior:
+        check if all keys in {metrics,pdb,track}_to_add 
+            can be find in records.
+        True: already processed; 
+        False: some keys are missing.
         '''
         for i in self.metrics_to_add:
             if not input.has_metric(i):
@@ -99,7 +101,7 @@ class BaseStep(ABC):
         for records_id,record in input.records.items():
             if input.overwrite or not self.check_processed(record):
                 self.process_record(record)
-                self.purge_record(input)
+                self.purge_record(record)
                 input.save_record(records_id)
         return input
     

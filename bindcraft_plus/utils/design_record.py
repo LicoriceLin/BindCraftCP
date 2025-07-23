@@ -146,6 +146,10 @@ class DesignBatch:
         self.records[record.id]=record
 
     def save_record(self,record_id:str,cache_dir:PathT|None=None):
+        '''
+        this method is not protected by `overwrite`,
+        as re-writing can be frequent.
+        '''
         assert record_id in self.records
         cache_path=self._fetch_cache_dir(cache_dir)/f'{record_id}.json'
         # if not self.overwrite:
@@ -159,6 +163,12 @@ class DesignBatch:
         self.save_log()
 
     def save_log(self):
+        '''
+        save self.metrics to self.log_json
+        if not self.metrics: do nothing.
+        '''
+        if not self.metrics:
+            return
         if not self.overwrite:
             if self.log_json.exists():
                 prev_log=json.load(open(self.log_json,'r'))
@@ -174,6 +184,21 @@ class DesignBatch:
             ret[metric]={k:v.get_metrics(metric) for k,v in self.records.items()}
         return ret
     
+    def to_fasta(self,outfile:str|None=None)->str|None:
+        '''
+        outfile is None: return the fasta str.
+        otherwise: return None, save str to file. 
+        '''
+        o=[]
+        for k,v in self.records.items():
+            o.append(f'>{k}\n{v.sequence}')
+        ret='\n'.join(o)
+        if outfile is None:
+            return ret
+        else:
+            with open(outfile,'w') as f:
+                f.write(ret)
+
     @property
     def log_json(self):
         return self.cache_dir/'metrics.json'

@@ -13,13 +13,33 @@ from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
 from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 import tempfile
 from .basestep import BaseStep,DesignBatch,DesignRecord,NEST_SEP
+from collections import OrderedDict
+from typing import Dict
 
+def _pose_chain_length(pose):
+    chain_lengths = OrderedDict()
+    for i in range(1, pose.total_residue() + 1):
+        chain = pose.pdb_info().chain(i)
+        if chain not in chain_lengths:
+            chain_lengths[chain] = 1
+        else:
+            chain_lengths[chain] += 1
+    return chain_lengths
 
-def pr_relax(pdb_file:str, cyclize_peptide:bool=False)->str:
+def pr_relax(pdb_file:str, cyclize_peptide:bool=False,cyclize_chain:str='B')->str:
     # Generate pose
     pose = pr.pose_from_pdb(pdb_file)
     if cyclize_peptide:
-        b,e=len(pose.split_by_chain()[1])+1,len(pose)
+        # b,e=len(pose.split_by_chain()[1])+1,len(pose)
+        prev=1
+        chain_lengths=_pose_chain_length(pose)
+        for k,v in chain_lengths.items():
+            if k!='B':
+                prev+=v
+            else:
+                b=prev
+                e=prev+v-1
+                break
         mover=XmlObjects.static_get_mover(
             f'''<PeptideCyclizeMover name="close" >
             <Torsion res1="{e}" res2="{e}" res3="{b}" res4="{b}" atom1="CA" atom2="C" atom3="N" atom4="CA" cst_func="CIRCULARHARMONIC 3.141592654 0.005" />
@@ -89,22 +109,40 @@ class Relax(BaseStep):
 
     @property
     def pdb_to_add(self):
-        return tuple([self.pdb_to_take+'-'+self.metrics_prefix.strip(NEST_SEP)])
+        return tuple([self.pdb_to_take['pdb_key']+':'+self.metrics_prefix.strip(NEST_SEP)])
     
     def process_record(self, input:DesignRecord)->DesignRecord:
         # if not self.check_processed(input):
         with self.record_time(input):
             input.pdb_strs[self.pdb_to_add[0]]=pr_relax(
-                input.pdb_files[self.pdb_to_take],
-                cyclize_peptide=self.settings.adv.get('cyclize_peptide',False))
+                input.pdb_files[self.pdb_to_take['pdb_key']],
+                cyclize_peptide=self.settings.adv.get('cyclize_peptide',False),
+                cyclize_chain=self.pdb_to_take['binder_chain'])
         return input
     
-    def config_pdb_input_key(self, pdb_to_take = None):
+    @property
+    def pdb_to_take(self)->Dict[str,str]:
+        '''
+        pdb_to_take['pdb_key']: pdb key in records.
+        pdb_to_take['binder_chain']: only used for cyclic relax. 
+            chain to apply cyclization constraint on.
+        '''
+        return self._pdb_to_take
+
+    def config_pdb_input_key(self, 
+        pdb_to_take:str|None = None,binder_chain:str|None =None):
+
         if pdb_to_take is None:
-            self._pdb_to_take='halu'
+            _pdb_to_take='halu'
         else:
-            self._pdb_to_take=pdb_to_take
+            _pdb_to_take=pdb_to_take
     
+        if binder_chain is None:
+            if 'halu' in _pdb_to_take or 'refold' in _pdb_to_take:
+                _binder_chain=self.settings.target_settings.new_binder_chain
+            else:
+                _binder_chain=self.settings.target_settings.full_binder_chain
+        self._pdb_to_take={'pdb_key':_pdb_to_take,'binder_chain':_binder_chain}
 
     
 

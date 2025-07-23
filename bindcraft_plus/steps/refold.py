@@ -181,9 +181,10 @@ class Refold(BaseStep):
         self.config_pdb_purge(pdb_purge_stem)
         self.config_metrics_prefix(metrics_prefix)
         for design_id in self.sort_batch(input):
-            if not self.check_processed(input.records[design_id]):
-                self.process_record(input.records[design_id])
-                self.purge_record(input)
+            record=input.records[design_id]
+            if not self.check_processed(record):
+                self.process_record(record)
+                self.purge_record(record)
                 input.save_record(design_id)
         return input
 

@@ -179,7 +179,8 @@ class Hallucinate(BaseStep):
                         self.purge_record(record)
                         batch.save_record(design_id)
                     global_id+=1
-        return batch
+        batch_slice=batch.filter(lambda x: x.id.startswith(binder_settings.binder_name))
+        return batch_slice # batch #
     
 # Get pLDDT of best model
 def get_best_plddt(af_model, length):
