@@ -12,6 +12,7 @@ def no_organic_purify(obj:str):
 def cal_sasa(obj:str):
     cmd.set('dot_solvent',1)
     cmd.set('dot_density',3)
+    cmd.flag('ignore','solvent')
     cmd.get_area(obj,load_b=1)
 
 def get_group_sasa(sel:str):
@@ -46,11 +47,35 @@ def res_sasa(chain:str, resi:str,obj:str=''):
 def sasa_scale(resn:str)->float:
     return GeorgeDSASA_scale.get(resn,1.118)
 
+def iterate_resi(chain:str,obj:str='',only_canonical:bool=True)->str:
+    if obj:
+        obj_=f' and {obj}'
+    else:
+        obj_=''
+    if only_canonical:
+        o=[]
+        cmd.iterate(
+            f'name CA and (chain {chain}) {obj_}',
+            'o.append(str(index))',
+            space={'o':o}
+            )
+        return '( index '+ ','.join(o)+ ' )'
+    else:
+        o={}
+        cmd.iterate(
+            f'(chain {chain}) {obj_}',
+            'o[(chain,resi)]=str(index)',
+            space={'o':o}
+            )
+        return '( index '+ ','.join(o.values())+ ' )'
+    
+
 
 def rSASA(obj:str,chain:str):
     cal_sasa(obj)
     residues = {}
-    cmd.iterate(f'name ca  and (chain {chain}) and {obj}', 
+    sel=iterate_resi(chain,obj,only_canonical=False)
+    cmd.iterate(f'{sel} and {obj}',#f'name ca  and (chain {chain}) and {obj}', 
         'residues.update({(chain, resi): res_sasa(chain, resi, obj)/sasa_scale(resn)}) ', # resn3_to_1(resn),
         space={"residues":residues,"resn3_to_1":resn3_to_1,'res_sasa':res_sasa,"sasa_scale":sasa_scale,"obj":obj})
     return residues
@@ -69,7 +94,6 @@ def hotspots_by_ligand(obj:str,target_chain:str,ligand_chain:str):
     apo_rsasa=rSASA('target',target_chain)
     hotspots=[]
     for k,v in apo_rsasa.items():
-        # diff=
         if v-holo_rsasa[k]>0:
             hotspots.append(k)
     return {'hotspots':hotspots,'holo_rsasa':holo_rsasa,'apo_rsasa':apo_rsasa}

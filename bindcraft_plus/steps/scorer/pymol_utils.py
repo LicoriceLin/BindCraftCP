@@ -26,6 +26,7 @@ GeorgeDSASA_scale = {
 def _cal_sasa(obj:str):
     cmd.set('dot_solvent',1)
     cmd.set('dot_density',3)
+    cmd.flag('ignore','solvent')
     cmd.get_area(obj,load_b=1)
 
 def get_group_sasa(sel:str):
@@ -50,10 +51,35 @@ def res_sasa(chain:str, resi:str,obj:str=''):
     cmd.iterate(sel , "bs.append(b)", space={'bs': bs})
     return sum(bs)
 
-def rSASA(obj:str,chain:str)->Dict[Tuple[str,str],float]:
+def iterate_resi(chain:str,obj:str='',only_canonical:bool=True)->str:
+    if obj:
+        obj_=f' and {obj}'
+    else:
+        obj_=''
+    if only_canonical:
+        o=[]
+        cmd.iterate(
+            f'name CA and (chain {chain}) {obj_}',
+            'o.append(str(index))',
+            space={'o':o}
+            )
+        return '( index '+ ','.join(o)+ ' )'
+    else:
+        o={}
+        cmd.iterate(
+            f'(chain {chain}) {obj_}',
+            'o[resi]=str(index)',
+            space={'o':o}
+            )
+        return '( index '+ ','.join(o.values())+ ' )'
+    
+
+
+def rSASA(obj:str,chain:str):
     _cal_sasa(obj)
     residues = {}
-    cmd.iterate(f'name ca  and (chain {chain}) and {obj}', 
+    sel=iterate_resi(chain,obj,only_canonical=False)
+    cmd.iterate(f'{sel} and {obj}',#f'name ca  and (chain {chain}) and {obj}', 
         'residues.update({(chain, resi): res_sasa(chain, resi, obj)/sasa_scale(resn)}) ', # resn3_to_1(resn),
         space={"residues":residues,"resn3_to_1":resn3_to_1,'res_sasa':res_sasa,"sasa_scale":sasa_scale,"obj":obj})
     return residues
