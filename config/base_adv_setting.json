@@ -1,5 +1,6 @@
 {
     "cyclize_peptide": false,
+    "templated":false,
     "omit_AAs":"",
     "use_multimer_design": true,
     "design_algorithm": "4stage",
@@ -34,7 +35,7 @@
     "use_rg_loss": true,
     "weights_rg": 0.3,
 
-    
+    "mpnn_bias_recipe":"config/mpnn-default-recipe.json",
     "enable_mpnn": true,
     "mpnn_fix_interface": false,
     "n_mpnn_samples": 20,

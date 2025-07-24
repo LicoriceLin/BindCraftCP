@@ -16,8 +16,8 @@ class BaseScorer(BaseStep):
     '''
     def __init__(self, settings:GlobalSettings,score_func:Callable):
         self._score_func=score_func
-        super().__init__(settings)
         self.params:Dict[str,Any]={}
+        super().__init__(settings)
         self._init_params()
         
     def config_pdb_input_key(self,pdb_to_take:str|None=None):
@@ -25,14 +25,16 @@ class BaseScorer(BaseStep):
         `pdb_to_take` will be updated to self.params.
         '''
         super().config_pdb_input_key(pdb_to_take)
-        self.config_params(pdb_to_take=self.pdb_to_take)
+        if getattr(self,'params',{}):
+            self.config_params(pdb_to_take=self.pdb_to_take)
 
     def config_metrics_prefix(self,metrics_prefix:str|None=None):
         '''
         `metrics_prefix` will be updated to self.params.
         '''
-        super().config_pdb_input_key(metrics_prefix)
-        self.config_params(metrics_prefix=self.metrics_prefix)
+        super().config_metrics_prefix(metrics_prefix)
+        if getattr(self,'params',{}):
+            self.config_params(metrics_prefix=self.metrics_prefix)
 
     @property
     def _default_metrics_prefix(self):

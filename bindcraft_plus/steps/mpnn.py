@@ -1,4 +1,4 @@
-from .basestep import BaseStep,DesignRecord,DesignBatch
+from .basestep import BaseStep,DesignRecord,DesignBatch,DesignBatchSlice
 from ..utils import GlobalSettings,NEST_SEP
 from .scorer.diversity_util import simple_diversity,cluster_and_get_medoids
 from typing import Callable,Dict,List,Any
@@ -27,13 +27,15 @@ class MPNN(BaseStep):
     @property
     def metrics_to_add(self):
         return tuple([self.metrics_prefix+'score',self.metrics_prefix+'seqid'])
-    
-    @property
-    def pdb_to_take(self)->str:
-        if self.settings.adv.get('templated',False):
-            return self.settings.adv.get('template-pdb-key','template')
+
+    def config_pdb_input_key(self, pdb_to_take = None):
+        if pdb_to_take is None:
+            if self.settings.adv.get('templated',False):
+                self._pdb_to_take = self.settings.adv.get('template-pdb-key','template')
+            else:
+                self._pdb_to_take = self.settings.adv.get('template-pdb-key','halu')
         else:
-            return self.settings.adv.get('template-pdb-key','halu')
+            self._pdb_to_take = None
 
     @property
     def mpnn_model(self):
@@ -60,7 +62,7 @@ class MPNN(BaseStep):
     
     def init_penalty_recipes(self):
         bias_recipe_file=self.settings.adv.get(
-            'mpnn_bias_recipe','bindcraft_plus/test/noCnoPPI-mpnn-recipe.json')
+            'mpnn_bias_recipe','config/mpnn-default-recipe.json')
         with open(bias_recipe_file,'r') as f:
             bias_recipe:dict=json.load(f)
         self.penalty_recipes:List[PenaltyRecipe]=[]
@@ -134,15 +136,21 @@ class MPNN(BaseStep):
             ret=self.run_mpnn(input)
         return ret
     
-    def process_batch(self,input:DesignBatch,metrics_prefix:str|None=None
-            )->DesignBatch:
-        self.config_metrics_prefix(metrics_prefix)
+    def process_batch(self,input:DesignBatch,
+        metrics_prefix:str|None=None,pdb_to_take:str=None,
+        )->DesignBatch:
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
+        if pdb_to_take is not None:
+            self.config_pdb_input_key(pdb_to_take)
         mpnn_suffix=self.metrics_prefix.strip(NEST_SEP)
         new_designs:List[DesignRecord]=[]
         for records_id,record in input.records.items():
             if mpnn_suffix not in records_id:
-                if input.overwrite or f'{records_id}-{mpnn_suffix}1' not in input.records:
-                    # for i in self.process_record(record)[1:]:
+                sampled= f'{records_id}-{mpnn_suffix}1' in input.records
+                if isinstance(input,DesignBatchSlice):
+                    sampled = sampled or f'{records_id}-{mpnn_suffix}1' in input.parent.records
+                if input.overwrite or not sampled:
                     new_designs.extend(self.process_record(record)[1:])
         for i in new_designs:
             input.add_record(i)

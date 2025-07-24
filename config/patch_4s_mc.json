@@ -1,0 +1,8 @@
+{   
+    "4stage-mcmc": true,
+    "greedy_iterations": 15,
+    "greedy_percentage": 5,
+    "mcmc_half_life_ratio":0.2,
+    "t_init_mcmc":0.01,
+    "4stage_keep_best":true
+    }

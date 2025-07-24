@@ -2,7 +2,7 @@ from typing import List
 from propka.run import single
 from .basescorer import BaseScorer,GlobalSettings,DesignRecord,DesignBatch,NEST_SEP
 
-def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--protonate-all']):
+def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--protonate-all','--quiet']):
     optargs.append(f'-c={binder_chain}')
     o=single(pdbfile,optargs=optargs,write_pka=False)
     pif,piu=o.get_pi()
@@ -15,7 +15,7 @@ def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--protona
     return pis
 
 def propka_record(record:DesignRecord,pdb_to_take:str,
-    binder_chain:str='B',optargs:List[str]=['--protonate-all'],
+    binder_chain:str='B',optargs:List[str]=['--protonate-all','--quiet'],
     metrics_prefix:str='',only_pifold:bool=True):
     optargs.append(f'-c={binder_chain}')
     o=single(record.pdb_files[pdb_to_take],optargs=optargs,write_pka=False)
@@ -41,7 +41,7 @@ class AnnotPI(BaseScorer):
         pdb_to_take=self.pdb_to_take,
         metrics_prefix=self.metrics_prefix,
         binder_chain='B',
-        optargs=['--protonate-all'],
+        optargs=['--quiet'],
         only_pifold=True)
 
     @property

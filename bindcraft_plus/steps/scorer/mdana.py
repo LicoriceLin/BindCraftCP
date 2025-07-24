@@ -115,15 +115,16 @@ def _ligand_target_chain_pair(target_chain:str,ligand_chain:str):
         cp.extend([(tc,ligand_chain),(ligand_chain,tc)])
     return cp
 
-
-def annot_aatype(seq:str,type_dict:dict={
+aatype_dict={
     "+":"RHK",
     "-":"DE",
     "*":"CGP",
     "H":"STNQ",
     "A":"AVILM",
     "F":"FYW"
-    }):
+    }
+
+def annot_aatype(seq:str,type_dict:Dict[str,str]=aatype_dict):
     idx={}
     for k,v in type_dict.items():
         for i in v:

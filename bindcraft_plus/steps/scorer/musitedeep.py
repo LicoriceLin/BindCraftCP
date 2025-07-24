@@ -1,5 +1,5 @@
 import tempfile
-from subprocess import run
+from subprocess import run,DEVNULL
 from .basescorer import BaseScorer,GlobalSettings,DesignRecord,DesignBatch,NEST_SEP
 import os
 from pathlib import Path
@@ -59,7 +59,7 @@ def musite_on_fasta(fasta:str,model:str,
             '-output',f'{tdir}/{model}',
             '-model-prefix',f'models/{model}',],
             cwd=f'{repo_dir}/MusiteDeep',
-            stdout=None,stderr=None)
+            stdout=DEVNULL,stderr=DEVNULL)
         o=parse_musite_single(f'{tdir}/{model}_results.txt')
     return o
 
@@ -81,7 +81,7 @@ def run_musite(batch:DesignBatch,model:str,
             '-output',f'{tdir}/{model}',
             '-model-prefix',f'models/{model}',],
             cwd=f'{repo_dir}/MusiteDeep',
-            stdout=None,stderr=None)
+            stdout=DEVNULL,stderr=DEVNULL)
         o=parse_musite_single(f'{tdir}/{model}_results.txt')
     
     for record_id,record, in batch.records.items():
@@ -100,6 +100,7 @@ class AnnotPTM(BaseScorer):
 
     def _init_params(self):
         self.params=dict(
+        model='O-linked_glycosylation',
         env=self.settings.adv.get('musite_env','musite'),
         repo_dir=self.settings.adv.get('musite_repo',"../MusiteDeep_web"),
         metrics_prefix=self.metrics_prefix)
@@ -116,6 +117,10 @@ class AnnotPTM(BaseScorer):
     def current_ptm(self):
         return self.params['model']
 
+    @property
+    def avail_ptm(self):
+        return tuple(AVAILABLE_PTM)
+    
     def process_record(self, input:DesignRecord):
         '''
         Not implemented. Call `process_batch` instead.
@@ -129,8 +134,9 @@ class AnnotPTM(BaseScorer):
     def process_batch(self, input:DesignBatch, **kwargs):
         self.config_params(**kwargs)
         sub_batch=input.filter(lambda i: not self.check_processed(i))
-        self.score_func(sub_batch)
-        sub_batch.save_records()
-
+        if len(sub_batch)>0:
+            self.score_func(sub_batch)
+            sub_batch.save_records()
+        return input
 
     

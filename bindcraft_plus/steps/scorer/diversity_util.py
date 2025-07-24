@@ -17,7 +17,7 @@ def simple_diversity(df:pd.DataFrame):
     odf=pd.DataFrame(columns=df.index,index=df.index)
     for i, j in combinations(df['sequence'].index, 2):
         odf.at[i, j] = odf.at[j, i] = 1/(_simple_identity(df['sequence'][i], df['sequence'][j])+ 1e-3)
-    odf=odf.fillna(1.)
+    odf=odf.fillna(1.).infer_objects(copy=False)
     return odf
 
 def cluster_and_get_medoids(distance_matrix, num_clusters=5):

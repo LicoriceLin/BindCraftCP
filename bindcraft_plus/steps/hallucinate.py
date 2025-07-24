@@ -92,8 +92,6 @@ class Hallucinate(BaseStep):
         advanced_settings=self.settings.adv
         design_models = [0,1,2,3,4] if advanced_settings["use_multimer_design"] else [0,1]
         verb=advanced_settings.get('verb',1)
-        # af_model.design_logits(iters=50, e_soft=0.9, models=design_models,
-        #      num_models=1, sample_models=advanced_settings["sample_models"], save_best=True)
         if verb: 
             print("Running SGD-based hallucination...")
         af_model.design_logits(iters=advanced_settings["soft_iterations"], e_soft=1, models=design_models, num_models=1, sample_models=advanced_settings["sample_models"],
@@ -151,14 +149,16 @@ class Hallucinate(BaseStep):
         batch_cache_stem:str='metrics',
         pdb_purge_stem:Optional[str]=None,
         metrics_prefix:str|None=None, 
-        overwrite:bool=False,input=None)->DesignBatch:
+        overwrite:bool=False,input=None)->DesignBatchSlice:
         '''
         cache_stem: path to cache output `DesignBatch`
         pdb_purge_stem: None: save with batch; else: purge pdb to this dir
         metrics_prefix: metrics_prefix > adv[f'{self.name}-prefix'] > self._default_metrics_prefix
         '''
-        self.config_pdb_purge(pdb_purge_stem)
-        self.config_metrics_prefix(metrics_prefix)
+        if pdb_purge_stem is not None:
+            self.config_pdb_purge(pdb_purge_stem)
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
         binder_settings=self.settings.binder_settings
         batch=DesignBatch(Path(binder_settings.design_path)/batch_cache_stem)
         batch.set_overwrite(overwrite)

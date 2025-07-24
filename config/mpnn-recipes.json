@@ -1,0 +1,26 @@
+{
+    "Sp-Surf-Charge":{
+        "select_func_expr":"lambda s: s['surf'] and s['aatype'] in '+-'",
+        "penalties_aas":{"No":"C","Sp":"DEKR"}
+        },
+    "No-Ngly":{
+        "select_func_expr":"lambda s: s['N-linked_glycosylation']>0.5 and s['surf']",
+        "penalties_aas":{"No":"C","Hp":"N"}
+        },
+    "No-Ogly":{
+        "select_func_expr":"lambda s: s['O-linked_glycosylation']>0.5 and s['surf']",
+        "penalties_aas":{"No":"C","Hp":"ST"}
+        },
+    "Unsat-PPI-Polar":{
+        "select_func_expr":"lambda s: s['unsat_ppi_polar']>0",
+        "penalties_aas":{"No":"C","Sp":"RHKDESTNQ"}
+        },
+    "No-C-No-PPI":{
+        "select_func_expr":"lambda s: not s['ppi']",
+        "penalties_aas":{"No":"C"}
+        },
+    "No-Surf-MK":{
+        "select_func_expr":"lambda s: s['ppi'] and s['seq'] in 'MK' ",
+        "penalties_aas":{"No":"CMK"}
+        }
+    }

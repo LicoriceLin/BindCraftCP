@@ -62,6 +62,8 @@ class AnnotRMSD(BaseScorer):
         '''
         {"mobile":...,'target':...}
         '''
+        if not hasattr(self,'_pdb_to_take'):
+            self.config_pdb_input_key()
         return self._pdb_to_take
     
 

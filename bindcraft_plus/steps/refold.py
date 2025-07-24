@@ -165,7 +165,9 @@ class Refold(BaseStep):
     
     def process_batch(self, input:DesignBatch,
         pdb_purge_stem:Optional[str]=None,
-        metrics_prefix:str|None=None):
+        metrics_prefix:str|None=None,
+        pdb_to_take:str=None,
+        ):
         '''
         advanced settings:
             refold-template-pdb-key:str ='graft' 
@@ -178,8 +180,12 @@ class Refold(BaseStep):
             num_recycles_validation: int
 
         '''
-        self.config_pdb_purge(pdb_purge_stem)
-        self.config_metrics_prefix(metrics_prefix)
+        if pdb_purge_stem is not None:
+            self.config_pdb_purge(pdb_purge_stem)
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
+        if pdb_to_take is not None:
+            self.config_pdb_input_key(pdb_to_take)
         for design_id in self.sort_batch(input):
             record=input.records[design_id]
             if not self.check_processed(record):

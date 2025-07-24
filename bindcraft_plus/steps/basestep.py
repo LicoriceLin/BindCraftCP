@@ -45,6 +45,8 @@ class BaseStep(ABC):
         scorer's input pdb is frequently changed.
         use `self.set_input_key` to reconfigure it.
         '''
+        if not hasattr(self,'_pdb_to_take'):
+            self.config_pdb_input_key()
         return self._pdb_to_take
     
     @property
@@ -81,6 +83,7 @@ class BaseStep(ABC):
     def process_batch(self, 
         input: DesignBatch|None=None,
         pdb_purge_stem:Optional[str]=None,
+        pdb_to_take:str|None=None,
         metrics_prefix:str|None=None
         )->DesignBatch|None:
         '''
@@ -96,8 +99,12 @@ class BaseStep(ABC):
         Batch level operation:
             sort, filter(in Filter subclass), post-analysis.
         '''
-        self.config_pdb_purge(pdb_purge_stem)
-        self.config_metrics_prefix(metrics_prefix)
+        if pdb_purge_stem is not None:
+            self.config_pdb_purge(pdb_purge_stem)
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
+        if pdb_to_take is not None:
+            self.config_pdb_input_key(pdb_to_take)
         for records_id,record in input.records.items():
             if input.overwrite or not self.check_processed(record):
                 self.process_record(record)
