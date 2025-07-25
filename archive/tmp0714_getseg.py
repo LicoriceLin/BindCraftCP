@@ -1,4 +1,4 @@
-from bindcraft_plus.utils.pymol_utils import *
+from bindcraft_plus.steps.scorer.pymol_utils import *
 import json
 target_metadata={
     "TBLR1":

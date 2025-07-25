@@ -3,7 +3,6 @@
     "templated":false,
     "omit_AAs":"",
     "use_multimer_design": true,
-    "design_algorithm": "4stage",
     "sample_models": true,
     "rm_template_seq_design": false,
     "rm_template_seq_predict": false,
@@ -16,6 +15,8 @@
     "hard_iterations": 5,
     "greedy_iterations": 15,
     "greedy_percentage": 5,
+    "4stage-use-pssm": false,
+    "4stage-mcmc": false,
 
     "save_design_animations": true,
     "save_design_trajectory_plots": true,

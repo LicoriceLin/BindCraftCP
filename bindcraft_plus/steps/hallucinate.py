@@ -102,20 +102,24 @@ class Hallucinate(BaseStep):
             sample_models=advanced_settings["sample_models"], dropout=False, ramp_recycles=False, save_best=True,verbose=verb)
         greedy_tries = math.ceil(af_model._binder_len * (advanced_settings["greedy_percentage"] / 100))
         af_model.clear_best()
+        if advanced_settings.get('4stage-use-pssm',False):
+            seq_logits = None
+        else:
+            seq_logits = af_model.aux["seq"]["pssm"][0]
         if not advanced_settings.get('4stage-mcmc',False):
             af_model.design_pssm_semigreedy(
                 soft_iters=0, hard_iters=advanced_settings["greedy_iterations"], tries=greedy_tries, models=design_models, 
                 num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True,
-                seq_logits=af_model.aux["seq"]["pssm"][0],verbose=verb)
+                seq_logits=seq_logits,verbose=verb)
         else:
             af_model._design_mcmc(
                 steps=advanced_settings["greedy_iterations"], 
                 half_life=int(advanced_settings["greedy_iterations"]*advanced_settings.get('mcmc_half_life_ratio',0.2)), 
-                T_init=advanced_settings.get('t_init_mcmc',0.01), 
+                seq_logits=seq_logits,T_init=advanced_settings.get('t_init_mcmc',0.01), 
                 mutation_rate=greedy_tries, num_models=1, 
                 models=design_models,
                 sample_models=advanced_settings["sample_models"], save_best=True,verbose=verb)
-        if advanced_settings.get('4stage_keep_best',False):
+        if advanced_settings.get('4stage_keep_best',False) and advanced_settings["greedy_iterations"]>0:
             best = af_model._tmp["best"]
             af_model.aux, seq = best["aux"], jnp.array(best["aux"]["seq"]['input'])
             af_model.set_seq(seq=seq, bias=af_model._inputs["bias"])
