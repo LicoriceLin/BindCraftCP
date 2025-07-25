@@ -52,7 +52,7 @@ class TargetSettings(BaseSettings):
         if (self.full_target_chain is not None 
             and self.full_binder_chain in self.full_target_chain):
             for i in ascii_uppercase:
-                if i !='A' and i!= self.full_target_chain and i not in self.full_binder_chain.split(','):
+                if i !='A' and i!= self.full_binder_chain and i not in self.full_target_chain.split(','):
                     self.new_binder_chain=i
                     break
         else:
