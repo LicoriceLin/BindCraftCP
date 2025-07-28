@@ -21,6 +21,6 @@
         },
     "No-Surf-MK":{
         "select_func_expr":"lambda s: s['ppi'] and s['seq'] in 'MK' ",
-        "penalties_aas":{"No":"CMK"}
+        "penalties_aas":{"No":"C","Hp":"MK"}
         }
     }

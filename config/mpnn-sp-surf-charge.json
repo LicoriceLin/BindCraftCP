@@ -1,0 +1,10 @@
+{
+    "Sp-Surf-Charge":{
+        "select_func_expr":"lambda s: s['surf'] and s['aatype'] in '+-'",
+        "penalties_aas":{"No":"C","Sp":"DEKR"}
+        },
+    "No-C-No-PPI":{
+        "select_func_expr":"lambda s: not s['ppi']",
+        "penalties_aas":{"No":"C"}
+        }
+    }

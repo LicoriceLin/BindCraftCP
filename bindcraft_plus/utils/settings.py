@@ -49,12 +49,14 @@ class TargetSettings(BaseSettings):
     full_binder_chain:str='B'
     new_binder_chain:str=field(repr=False,init=False,default='')
     def __post_init__(self):
-        if (self.full_target_chain is not None 
-            and self.full_binder_chain in self.full_target_chain):
-            for i in ascii_uppercase:
-                if i !='A' and i!= self.full_binder_chain and i not in self.full_target_chain.split(','):
-                    self.new_binder_chain=i
-                    break
+        if self.full_target_chain is not None:
+            if self.full_binder_chain in self.full_target_chain:
+                for i in ascii_uppercase:
+                    if i !='A' and i!= self.full_binder_chain and i not in self.full_target_chain.split(','):
+                        self.new_binder_chain=i
+                        break
+            else:
+                self.new_binder_chain=self.full_binder_chain
         else:
             self.full_target_chain='A' # default output from colabdesign.
             self.new_binder_chain=self.full_binder_chain
