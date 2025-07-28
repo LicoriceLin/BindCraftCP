@@ -228,7 +228,10 @@ class DesignBatch:
         ret:DesignBatchSlice=self[record_ids]
         ret.set_log_stem(new_log_stem)
         return ret
-
+    
+    def apply(self,fn:Callable[[DesignRecord],None]):
+        for k,v in self.records.items():
+            fn(v)
 
 
 class DesignBatchSlice(DesignBatch):

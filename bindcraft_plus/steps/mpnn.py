@@ -152,6 +152,7 @@ class MPNN(BaseStep):
                     sampled = sampled or f'{records_id}-{mpnn_suffix}1' in input.parent.records
                 if input.overwrite or not sampled:
                     new_designs.extend(self.process_record(record)[1:])
+                    input.save_record(record.id) 
         for i in new_designs:
             input.add_record(i)
             input.save_record(i.id)

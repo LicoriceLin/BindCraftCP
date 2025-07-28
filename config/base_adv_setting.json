@@ -17,6 +17,7 @@
     "greedy_percentage": 5,
     "4stage-use-pssm": false,
     "4stage-mcmc": false,
+    "4stage_keep_best": true,
 
     "save_design_animations": true,
     "save_design_trajectory_plots": true,
