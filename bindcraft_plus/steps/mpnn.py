@@ -35,7 +35,7 @@ class MPNN(BaseStep):
             else:
                 self._pdb_to_take = self.settings.adv.get('template-pdb-key','halu')
         else:
-            self._pdb_to_take = None
+            self._pdb_to_take = pdb_to_take
 
     @property
     def mpnn_model(self):

@@ -142,7 +142,7 @@ class Refold(BaseStep):
             d={k:len(v.sequence) for k,v in input.records.items()}
             
         else:
-            d={k:(len(v.sequence),v.pdb_files['template']) for k,v in input.records.items()}
+            d={k:(len(v.sequence),v.pdb_files[self.pdb_to_take]) for k,v in input.records.items()}
         return sorted(d,key=lambda k:d[k])
 
     def check_processed(self,input: DesignRecord)->bool:
