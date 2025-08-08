@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from colabdesign import mk_afdesign_model
 from colabdesign.af.alphafold.common import residue_constants
 from colabdesign.af.loss import get_ptm, mask_loss, get_dgram_bins, _get_con_loss
-
+from tqdm import tqdm
 class Hallucinate(BaseStep):
     def __init__(self,
         settings:GlobalSettings,
@@ -173,6 +173,8 @@ class Hallucinate(BaseStep):
         global_id=0
         tot=len(binder_settings.binder_lengths)*len(binder_settings.random_seeds)*len(binder_settings.helix_values)
         to_fill=int(math.log10(tot)+1)
+        pbar = tqdm(total=tot,desc=f'{self.name}: prefix={self.metrics_prefix}')
+        ids=[]
         for length in binder_settings.binder_lengths:
             for seed in binder_settings.random_seeds:
                 for helicity_value in binder_settings.helix_values:
@@ -184,7 +186,10 @@ class Hallucinate(BaseStep):
                         self.purge_record(record)
                         batch.save_record(design_id)
                     global_id+=1
-        batch_slice=batch.filter(lambda x: x.id.startswith(binder_settings.binder_name))
+                    ids.append(design_id)
+                    pbar.update(1)
+        # batch_slice=batch.filter(lambda x: x.id.startswith(binder_settings.binder_name))
+        batch_slice=batch[ids]
         return batch_slice # batch #
     
 # Get pLDDT of best model

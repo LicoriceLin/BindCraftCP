@@ -43,7 +43,7 @@
         "*pkl",
         ".*/**",
         "params",
-        "input/",
+        "input/"
       ],
       "typeCheckingMode": "off"
 

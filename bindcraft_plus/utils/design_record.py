@@ -6,7 +6,7 @@ import os,json
 import pandas as pd
 from pathlib import Path
 from .utils import NEST_SEP, _iterate_get, _iterate_set,_iterate_in,_iterate_get_safe
-
+from logging import warning
 PathT=os.PathLike[str]|None
 
 @dataclass
@@ -142,7 +142,7 @@ class DesignBatch:
 
     def add_record(self,record:DesignRecord):
         if not self.overwrite:
-            assert record.id not in self.records
+            assert (record.id not in self.records) or self[record.id] is record
         self.records[record.id]=record
 
     def save_record(self,record_id:str,cache_dir:PathT|None=None):
@@ -232,6 +232,29 @@ class DesignBatch:
     def apply(self,fn:Callable[[DesignRecord],None]):
         for k,v in self.records.items():
             fn(v)
+
+    def shallow_copy(self,cache_dir:PathT)->'DesignBatch':
+        '''
+        construct softlink from disk.
+        won't saving data in memory to disk.
+        '''
+        cache_dir=Path(cache_dir)
+        cache_dir.mkdir(exist_ok=True)
+        for k,v in self.records.items():
+            ori=self.cache_dir/f'{v.id}.json'
+            new_record=cache_dir/f'{v.id}.json'
+            if new_record.exists():
+                if os.path.islink(new_record):
+                    continue
+                else:
+                    warning(f'exsiting, non-softlink record: {v.id}')
+            else:
+                os.symlink(ori.absolute(),new_record)
+        if self.log_json.exists():
+            new_log=cache_dir/(self.log_json.stem+'.json')
+            if not new_log.exists():
+                os.symlink(self.log_json.absolute(),new_record)
+        return DesignBatch.from_cache(cache_dir)
 
 
 class DesignBatchSlice(DesignBatch):

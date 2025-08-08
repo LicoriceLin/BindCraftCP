@@ -7,7 +7,7 @@ import numpy as np
 import pickle as pkl
 import math
 import json
-
+from tqdm import tqdm
 from colabdesign.mpnn import mk_mpnn_model
 from colabdesign.af.alphafold.common import residue_constants
 
@@ -88,13 +88,13 @@ class MPNN(BaseStep):
 
         self.mpnn_model.prep_inputs(pdb_file,
             f'{full_target_chain},{binder_chain}',fix_pos=fixed_positions)
-        ori_score=self.mpnn_model.score()['score']
+        ori_score=self.mpnn_model.score(temperature=temperature)['score']
         record.update_metrics({
             f'{self.metrics_prefix}score':ori_score,
             f'{self.metrics_prefix}seqid':1.})
         self.mpnn_model._inputs['bias'][-length:]+=bias[:,:-1]
         mpnn_sequences = self.mpnn_model.sample(temperature=temperature, 
-            num=n_mpnn_samples, batch=n_mpnn_samples)
+            num=n_mpnn_samples, batch=16) #n_mpnn_samples
         mpnn_df=self._dedup_mpnn_results(mpnn_sequences,length,record.id,record.sequence)
         dis_df=simple_diversity(mpnn_df)
         if len(dis_df)>max_mpnn_sequences:
@@ -139,23 +139,35 @@ class MPNN(BaseStep):
     def process_batch(self,input:DesignBatch,
         metrics_prefix:str|None=None,pdb_to_take:str=None,
         )->DesignBatch:
+        self.init_penalty_recipes()
         if metrics_prefix is not None:
             self.config_metrics_prefix(metrics_prefix)
         if pdb_to_take is not None:
             self.config_pdb_input_key(pdb_to_take)
         mpnn_suffix=self.metrics_prefix.strip(NEST_SEP)
-        new_designs:List[DesignRecord]=[]
-        for records_id,record in input.records.items():
+        # new_designs:List[DesignRecord]=[]
+        desc=f'{self.name}: from {self.pdb_to_take} to {mpnn_suffix}'
+        input_ = input[input.keys()]
+        for records_id,record in tqdm(input_.records.items(),desc=desc):
             if mpnn_suffix not in records_id:
                 sampled= f'{records_id}-{mpnn_suffix}1' in input.records
                 if isinstance(input,DesignBatchSlice):
                     sampled = sampled or f'{records_id}-{mpnn_suffix}1' in input.parent.records
                 if input.overwrite or not sampled:
-                    new_designs.extend(self.process_record(record)[1:])
+                    # new_designs.extend()
+                    for i in self.process_record(record)[1:]:
+                        input.add_record(i)
+                        input.save_record(i.id)
                     input.save_record(record.id) 
-        for i in new_designs:
-            input.add_record(i)
-            input.save_record(i.id)
+                else:
+                    if sampled and isinstance(input,DesignBatchSlice):
+                        for mpnn_i in range(self.settings.adv.get("max_mpnn_sequences",2)):
+                            d_id=f'{records_id}-{mpnn_suffix}{mpnn_i+1}'
+                            if d_id in input.parent.records and d_id not in input.records:
+                                input.add_record(input.parent[d_id])
+
+        # for i in new_designs:
+        #     input.add_record(i)
         return input
     
 _default_penalties_values=dict(

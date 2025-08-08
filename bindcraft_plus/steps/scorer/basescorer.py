@@ -2,6 +2,7 @@ from ..basestep import BaseStep,GlobalSettings,DesignRecord,DesignBatch,NEST_SEP
 from abc import abstractmethod
 from functools import partial
 from typing import Callable,Dict,Any
+from tqdm import tqdm
 class BaseScorer(BaseStep):
     '''
     a proxy between score function and design pipeline.
@@ -20,20 +21,20 @@ class BaseScorer(BaseStep):
         super().__init__(settings)
         self._init_params()
         
-    def config_pdb_input_key(self,pdb_to_take:str|None=None):
+    def config_pdb_input_key(self,pdb_to_take:str|None=None,_reconfig_params:bool=True):
         '''
         `pdb_to_take` will be updated to self.params.
         '''
         super().config_pdb_input_key(pdb_to_take)
-        if getattr(self,'params',{}):
+        if getattr(self,'params',{}) and _reconfig_params:
             self.config_params(pdb_to_take=self.pdb_to_take)
 
-    def config_metrics_prefix(self,metrics_prefix:str|None=None):
+    def config_metrics_prefix(self,metrics_prefix:str|None=None,_reconfig_params:bool=True):
         '''
         `metrics_prefix` will be updated to self.params.
         '''
         super().config_metrics_prefix(metrics_prefix)
-        if getattr(self,'params',{}):
+        if getattr(self,'params',{}) and _reconfig_params:
             self.config_params(metrics_prefix=self.metrics_prefix)
 
     @property
@@ -62,6 +63,10 @@ class BaseScorer(BaseStep):
         for k,v in kwargs.items():
             if k in self.params:
                 self.params[k]=v
+            if k =='metrics_prefix':
+                self.config_metrics_prefix(metrics_prefix=v,_reconfig_params=False)
+            if k=='pdb_to_take':
+                self.config_pdb_input_key(pdb_to_take=v,_reconfig_params=False)
     
     @property
     def score_func(self)->Callable[[DesignRecord],DesignRecord]:
@@ -82,7 +87,8 @@ class BaseScorer(BaseStep):
         Note: params passed here would overwrite self.params. 
         '''
         self.config_params(**kwargs)
-        for records_id,record in input.records.items():
+        for records_id,record in tqdm(input.records.items(),
+            desc=f'{self.name} on {self.pdb_to_take}'):
             if input.overwrite or not self.check_processed(record):
                 self.process_record(record)
                 input.save_record(records_id)

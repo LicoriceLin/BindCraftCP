@@ -48,14 +48,19 @@ class AnnotRMSD(BaseScorer):
     def metrics_to_add(self):
         return tuple([self.metrics_prefix+k for k in ['target_rmsd','binder_rmsd']])
 
-    def config_pdb_input_key(self,mobile:str|None=None,target:str|None=None):
+    def config_pdb_input_key(self,mobile:str|None=None,target:str|None=None,
+            pdb_to_take:Dict[str,str]|None=None,_reconfig_params:bool=True):
+        if pdb_to_take is not None:
+            mobile=pdb_to_take.get('mobile',mobile)
+            target=pdb_to_take.get('target',target)
         if mobile is None:
             mobile='refold:multimer-1'
         if target is None:
             target = 'template' if self.settings.adv.get('templated',False) else 'halu'
         self._pdb_to_take={"mobile":mobile,'target':target}
-        self.config_params(mobile_pdb=self.pdb_to_take['mobile'],
-            target_pdb=self.pdb_to_take['target'])
+        if _reconfig_params:
+            self.config_params(mobile_pdb=self.pdb_to_take['mobile'],
+               target_pdb=self.pdb_to_take['target'])
 
     @property
     def pdb_to_take(self)->Dict[str,str]:

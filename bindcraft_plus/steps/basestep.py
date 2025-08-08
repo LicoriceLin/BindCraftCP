@@ -12,6 +12,7 @@ import os, re, shutil, math, pickle
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List,Dict,Tuple,Optional
+from tqdm import tqdm
 
 class BaseStep(ABC):
     def __init__(self,
@@ -68,7 +69,7 @@ class BaseStep(ABC):
             if not input.has_pdb(i):
                 return False
         for i in self.track_to_add:
-            if i not in input.ana_tracks:
+            if i not in input.ana_tracks or not input.ana_tracks[i]:
                 return False
         return True
         
@@ -105,7 +106,7 @@ class BaseStep(ABC):
             self.config_metrics_prefix(metrics_prefix)
         if pdb_to_take is not None:
             self.config_pdb_input_key(pdb_to_take)
-        for records_id,record in input.records.items():
+        for records_id,record in tqdm(input.records.items(), desc=self.name):
             if input.overwrite or not self.check_processed(record):
                 self.process_record(record)
                 self.purge_record(record)

@@ -45,9 +45,9 @@ class TargetSettings(BaseSettings):
     chains:str
     target_hotspot_residues:Optional[str]=None
     full_target_pdb:Optional[str]=None
-    full_target_chain:Optional[str]=None
-    full_binder_chain:str='B'
-    new_binder_chain:str=field(repr=False,init=False,default='')
+    full_target_chain:Optional[str]=None # 
+    full_binder_chain:str='B' # the binder chain in hallu/refold output, usually B
+    new_binder_chain:str=field(repr=False,init=False,default='') # the binder chain in grafted template 
     def __post_init__(self):
         if self.full_target_chain is not None:
             if self.full_binder_chain in self.full_target_chain:

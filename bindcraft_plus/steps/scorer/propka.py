@@ -2,7 +2,7 @@ from typing import List
 from propka.run import single
 from .basescorer import BaseScorer,GlobalSettings,DesignRecord,DesignBatch,NEST_SEP
 
-def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--protonate-all','--quiet']):
+def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--quiet']): #'--protonate-all',
     optargs.append(f'-c={binder_chain}')
     o=single(pdbfile,optargs=optargs,write_pka=False)
     pif,piu=o.get_pi()
@@ -15,7 +15,7 @@ def propka_single(pdbfile:str,binder_chain:str='B',optargs:List[str]=['--protona
     return pis
 
 def propka_record(record:DesignRecord,pdb_to_take:str,
-    binder_chain:str='B',optargs:List[str]=['--protonate-all','--quiet'],
+    binder_chain:str='B',optargs:List[str]=['--quiet'], #'--protonate-all',
     metrics_prefix:str='',only_pifold:bool=True):
     optargs.append(f'-c={binder_chain}')
     o=single(record.pdb_files[pdb_to_take],optargs=optargs,write_pka=False)

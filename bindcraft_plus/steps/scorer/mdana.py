@@ -66,12 +66,11 @@ def salt_bridge(pdbfile:str,ppi_track:List[int],
     # Acid
     acidic_res = ["ASP", "GLU"]
     acidic_atoms = ["OD1", "OD2", "OE1", "OE2"]
-    acids = u.select_atoms(f"( segid A or {sel} ) and resname {' '.join(acidic_res)} and name {' '.join(acidic_atoms)}")
-
+    acids = u.select_atoms(f"{sel}  and resname {' '.join(acidic_res)} and name {' '.join(acidic_atoms)}")
     # Alkaline
     basic_res = ["ARG", "LYS", "HIS"]
     basic_atoms = ["NH1", "NH2", "NZ", "ND1", "NE2"]
-    bases = u.select_atoms(f"(segid A or {sel} ) and resname {' '.join(basic_res)} and name {' '.join(basic_atoms)}")
+    bases = u.select_atoms(f"{sel}  and resname {' '.join(basic_res)} and name {' '.join(basic_atoms)}")
 
     # distance
     dist_matrix = distance_array(acids.positions, bases.positions)
@@ -97,10 +96,12 @@ def salt_bridge(pdbfile:str,ppi_track:List[int],
 def _ppi_track_to_ires_sel(ppi_track:List[int],ligand_chain:str='B',target_chain:str='A'):
     target_chain=target_chain.replace(',',' ')
     inter_res=np.where(np.array(ppi_track))[0]+1
-    resnums=' '.join([str(i) for i in inter_res])
-    b_ires=f'( segid {ligand_chain} and resnum {resnums} and not backbone)'
-    inter_res=f'(segid {target_chain} or {b_ires})'
-    # print(inter_res)
+    if len(inter_res)>0:
+        resnums=' '.join([str(i) for i in inter_res])
+        b_ires=f'( segid {ligand_chain} and resnum {resnums} and not backbone)'
+        inter_res=f'(segid {target_chain} or {b_ires})'
+    else:
+        inter_res=f'(segid {target_chain})'
     return inter_res
 
 

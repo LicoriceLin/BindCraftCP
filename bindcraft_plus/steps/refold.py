@@ -3,7 +3,7 @@ from colabdesign import mk_afdesign_model
 from pymol import cmd
 import tempfile
 from string import ascii_uppercase
-
+from tqdm import tqdm
 class Refold(BaseStep):
     def __init__(self,settings:GlobalSettings):
         self.templated=settings.adv.get('templated',False)
@@ -186,7 +186,7 @@ class Refold(BaseStep):
             self.config_metrics_prefix(metrics_prefix)
         if pdb_to_take is not None:
             self.config_pdb_input_key(pdb_to_take)
-        for design_id in self.sort_batch(input):
+        for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}:'):
             record=input.records[design_id]
             if not self.check_processed(record):
                 self.process_record(record)

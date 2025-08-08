@@ -157,5 +157,5 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.align(f'{mobile} and ({mobile_sel})',mobile_sel)
     cmd.delete(f'{mobile}-aln')
     cmd.delete(f'{target}-aln')
-    ret2=cmd.rms_cur(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' )
+    ret2=cmd.align(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' ,cycles=0,transform=0)[0]
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
