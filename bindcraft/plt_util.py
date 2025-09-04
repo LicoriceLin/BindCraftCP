@@ -147,3 +147,13 @@ def add_filter_bar(ax:plt.Axes,filter_dict:Dict[str,bool|float|int|None]):
     ax.hlines(y_thresh,xmin,xmax,colors=c,linestyles='--')
     ax.arrow(arrow_x,y_thresh,0,dy,color=c,head_width=0.05,head_length=abs(dy*0.5),length_includes_head=True)
     return ax
+
+def hide_spline(ax:plt.Axes,hide:str='trlb'):
+    if 't' in hide:
+        ax.spines['top'].set_visible(False)
+    if 'r' in hide:    
+        ax.spines['right'].set_visible(False)
+    if 'l' in hide:
+        ax.spines['left'].set_visible(False)
+    if 'b' in hide:
+        ax.spines['bottom'].set_visible(False)

@@ -12,7 +12,7 @@ def no_organic_purify(obj:str):
     cmd.h_add(obj)
 
 def no_inorganic_purify(obj:str):
-    cmd.remove(f'{obj} and inorganic')
+    cmd.remove(f'{obj} and not organic and not polymer')
     cmd.h_add(obj)
 
 ### SASA ###
@@ -78,7 +78,9 @@ def iterate_resi(chain:str,obj:str='',only_canonical:bool=True)->str:
 def rSASA(obj:str,chain:str):
     _cal_sasa(obj)
     residues = {}
-    sel=iterate_resi(chain,obj,only_canonical=False)
+    sel=' or '.join([iterate_resi(c_,obj,only_canonical=False) for c_ in chain.split(',')])
+    if 'or' in sel:
+        sel=f' ( {sel} ) '
     cmd.iterate(f'{sel} and {obj}',#f'name ca  and (chain {chain}) and {obj}', 
         'residues.update({(chain, resi): res_sasa(chain, resi, obj)/sasa_scale(resn)}) ', # resn3_to_1(resn),
         space={"residues":residues,"resn3_to_1":resn3_to_1,'res_sasa':res_sasa,"sasa_scale":sasa_scale,"obj":obj})

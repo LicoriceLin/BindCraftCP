@@ -26,6 +26,8 @@ class Hallucinate(BaseStep):
         ret=[f'config:{i}' for i in ["helix",'length','seed']]
         prefix=self.metrics_prefix
         ret.extend([f'{prefix}pLDDT',f'{prefix}pTM',f'{prefix}i-pTM',f'{prefix}pAE',f'{prefix}i-pAE'])
+        if self.settings.adv.get('hallu_save_loss',False):
+            ret.extend([f'{self.metrics_prefix}loss'])
         return tuple(ret)
     
     @property
@@ -128,6 +130,8 @@ class Hallucinate(BaseStep):
         
         metrics={k:af_model.aux['log'][v] for k,v in {f'{prefix}pLDDT':'plddt',f'{prefix}pTM':'ptm',f'{prefix}i-pTM':'i_ptm',f'{prefix}pAE':'pae',f'{prefix}i-pAE':'i_pae'}.items()}
         # metrics.update({"helix":af_model.opt["weights"]["helix"],'length':af_model._binder_len,'seed':self._current_design_seed})
+        if advanced_settings.get('hallu_save_loss',False):
+            metrics[f'{prefix}loss'] = af_model.aux['log']['loss']
         pdbstr=af_model.save_pdb()
         input.sequence=af_model.get_seq(get_best=False)[0]
         input.pdb_strs.update({prefix.strip(NEST_SEP):pdbstr})
