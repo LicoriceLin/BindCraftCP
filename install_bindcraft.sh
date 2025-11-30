@@ -110,8 +110,8 @@ rm "${params_file}" || { echo -e "Warning: Failed to remove AlphaFold2 weights a
 
 # chmod executables
 echo -e "Changing permissions for executables\n"
-chmod +x "${install_dir}/functions/dssp" || { echo -e "Error: Failed to chmod dssp"; exit 1; }
-chmod +x "${install_dir}/functions/DAlphaBall.gcc" || { echo -e "Error: Failed to chmod DAlphaBall.gcc"; exit 1; }
+chmod +x "${install_dir}/bindcraft_plus/steps/dssp" || { echo -e "Error: Failed to chmod dssp"; exit 1; }
+chmod +x "${install_dir}/bindcraft_plus/steps/DAlphaBall.gcc" || { echo -e "Error: Failed to chmod DAlphaBall.gcc"; exit 1; }
 
 # finish
 conda deactivate

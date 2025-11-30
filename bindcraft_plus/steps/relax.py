@@ -14,7 +14,12 @@ from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 import tempfile
 from .basestep import BaseStep,DesignBatch,DesignRecord,NEST_SEP
 from collections import OrderedDict
-from typing import Dict
+from typing import Dict,Tuple
+from Bio.PDB import PDBParser,PDBIO
+from warnings import warn
+
+def init_pr(dalphaball_path:str):
+    pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {dalphaball_path} -corrections::beta_nov16 true -relax:default_repeats 1')
 
 def _pose_chain_length(pose):
     chain_lengths = OrderedDict()
@@ -30,11 +35,10 @@ def pr_relax(pdb_file:str, cyclize_peptide:bool=False,cyclize_chain:str='B')->st
     # Generate pose
     pose = pr.pose_from_pdb(pdb_file)
     if cyclize_peptide:
-        # b,e=len(pose.split_by_chain()[1])+1,len(pose)
         prev=1
         chain_lengths=_pose_chain_length(pose)
         for k,v in chain_lengths.items():
-            if k!='B':
+            if k!=cyclize_chain:
                 prev+=v
             else:
                 b=prev
@@ -86,10 +90,26 @@ def pr_relax(pdb_file:str, cyclize_peptide:bool=False,cyclize_chain:str='B')->st
     # output relaxed and aligned PDB
     with tempfile.TemporaryDirectory() as tdir:
         pose.dump_pdb(f'{tdir}/relaxed.pdb')
+        parser = PDBParser(QUIET=True)
+        if cyclize_peptide:
+            relax_struct=parser.get_structure('relaxed', f'{tdir}/relaxed.pdb')
+            ori_struct=parser.get_structure('ori', pdb_file)
+            for ori_res, relax_res in zip(ori_struct[0].get_residues(), relax_struct[0].get_residues()):
+                ori_b_factor=ori_res.child_list[0].bfactor
+                relax_b_facor=relax_res.child_list[0].bfactor
+                if relax_b_facor!=0: 
+                    if abs(relax_b_facor-ori_b_factor) >1e-3:
+                        warn(f'mismatch: {ori_res.parent.id}-{ori_res.id[1]} vs {relax_res.parent.id}-{relax_res.id[1]}')
+                else:
+                    for atom in relax_res.child_list:
+                        atom.set_bfactor(ori_b_factor)
+            io=PDBIO()
+            io.set_structure(relax_struct)
+            io.save(f'{tdir}/relaxed.pdb')
         return open(f'{tdir}/relaxed.pdb','r').read()
     
-def init_pr(dalphaball_path:str):
-    pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {dalphaball_path} -corrections::beta_nov16 true -relax:default_repeats 1')
+# def init_pr(dalphaball_path:str):
+#     pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {dalphaball_path} -corrections::beta_nov16 true -relax:default_repeats 1')
 
 class Relax(BaseStep):
     def __init__(self, settings, **kwargs):
@@ -100,11 +120,16 @@ class Relax(BaseStep):
     def name(self)->str:
         return 'relax'
     
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[f'{self.name}-prefix', f'{self.name}-pdb-input', 'dalphaball_path','cyclize_peptide']
+        return tuple(ret)
+    
     def init_pr(self):
-        dalphaball_path=self.settings.adv.get(
-            'dalphaball_path','functions/DAlphaBall.gcc')
+        dalphaball_path=self.settings.adv.setdefault(
+            'dalphaball_path','bindcraft_plus/steps/DAlphaBall.gcc')
         if not dalphaball_path: 
-            dalphaball_path='functions/DAlphaBall.gcc'
+            dalphaball_path='bindcraft_plus/steps/DAlphaBall.gcc'
         init_pr(dalphaball_path)
 
     @property
@@ -116,7 +141,7 @@ class Relax(BaseStep):
         with self.record_time(input):
             input.pdb_strs[self.pdb_to_add[0]]=pr_relax(
                 input.pdb_files[self.pdb_to_take['pdb_key']],
-                cyclize_peptide=self.settings.adv.get('cyclize_peptide',False),
+                cyclize_peptide=self.settings.adv.setdefault('cyclize_peptide',False),
                 cyclize_chain=self.pdb_to_take['binder_chain'])
         return input
     
@@ -129,21 +154,26 @@ class Relax(BaseStep):
         '''
         return self._pdb_to_take
 
-    def config_pdb_input_key(self, 
-        pdb_to_take:str|None = None,binder_chain:str|None =None):
-
-        if pdb_to_take is None:
-            _pdb_to_take='halu'
-        else:
-            _pdb_to_take=pdb_to_take
+    @property
+    def _default_pdb_input_key(self):
+        return {'pdb_key':'halu','binder_chain':'B'}
     
-        if binder_chain is None:
-            if 'halu' in _pdb_to_take or 'refold' in _pdb_to_take:
-                _binder_chain=self.settings.target_settings.new_binder_chain
-            else:
-                _binder_chain=self.settings.target_settings.full_binder_chain
-        self._pdb_to_take={'pdb_key':_pdb_to_take,'binder_chain':_binder_chain}
+        # if self.settings.adv.get('templated',False):
+        #     return 'halu'
+        # else:
+        #     return 'templated'
+        
+    # def config_pdb_input_key(self, 
+    #     pdb_to_take:str|None = None,binder_chain:str|None =None):
 
+    #     if pdb_to_take is None:
+    #         _pdb_to_take='halu'
+    #     else:
+    #         _pdb_to_take=pdb_to_take
     
-
-    
+    #     if binder_chain is None:
+    #         if 'halu' in _pdb_to_take or 'refold' in _pdb_to_take:
+    #             _binder_chain=self.settings.target_settings.new_binder_chain
+    #         else:
+    #             _binder_chain=self.settings.target_settings.full_binder_chain
+    #     self._pdb_to_take={'pdb_key':_pdb_to_take,'binder_chain':_binder_chain}

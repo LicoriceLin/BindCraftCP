@@ -2,7 +2,7 @@ import MDAnalysis as mda
 from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
 from MDAnalysis.analysis.distances import distance_array
 # from MDAnalysis.analysis.base import AnalysisFromFunction
-from typing import List,Dict
+from typing import List,Dict,Tuple
 import pandas as pd
 import numpy as np
 from .basescorer import (
@@ -173,18 +173,23 @@ def annot_polar_occupy(record:DesignRecord,pdb_to_take:str,
 
     
 class AnnotPolarOccupy(BaseScorer):
+    '''
+    Designed to work with relaxed conformation.
+    '''
     def __init__(self, settings:GlobalSettings):
-        super().__init__(settings,score_func=annot_polar_occupy)
+        super().__init__(settings,score_func=annot_polar_occupy,decoupled=True)
 
     @property
     def name(self)->str:
         return 'polar-occupy-annot'
     
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[f'{self.name}-prefix',f'{self.name}-pdb-input']
+        return tuple(ret)
+    
     def _init_params(self):
         '''
-        not a standard building block in BindCraft
-        minimal coupling with settings.
-        specify params in `process_batch`/`config_params`
         '''
         self.params=dict(
             pdb_to_take=self.pdb_to_take,

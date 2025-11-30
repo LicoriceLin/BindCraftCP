@@ -13,12 +13,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List,Dict,Tuple,Optional
 from tqdm import tqdm
+import pyrosetta as pr
 
 class BaseStep(ABC):
+    metrics_prefix:str
     def __init__(self,
         settings:GlobalSettings,**kwargs):
         self.settings=settings
-        # initial prefix: adv[f'{self.name}-prefix'] > self._default_metrics_prefix
         self.config_metrics_prefix()
         self.config_pdb_input_key()
         self.config_pdb_purge()
@@ -32,6 +33,10 @@ class BaseStep(ABC):
     def _default_metrics_prefix(self)->str:
         return f'{self.name}{NEST_SEP}'
 
+    @property
+    def _default_pdb_input_key(self)->str:
+        return ''
+    
     @property
     def metrics_to_add(self)->Tuple[str,...]:
         return tuple([])
@@ -50,6 +55,14 @@ class BaseStep(ABC):
             self.config_pdb_input_key()
         return self._pdb_to_take
     
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        '''
+        params taken from advanced settings. 
+        '''
+        return tuple([])
+    # params_keys = params_to_take
+
     @property
     def track_to_add(self)->Tuple[str,...]:
         return tuple([])
@@ -141,24 +154,27 @@ class BaseStep(ABC):
     def config_metrics_prefix(self,metrics_prefix:Optional[str]=None):
         '''
         metrics_prefix > adv[f'{self.name}-prefix'] > self._default_metrics_prefix
+        Note: usually metrics_prefix ends with `NEST_SEP`
         '''
         if metrics_prefix is not None:
-            self.metrics_prefix=metrics_prefix
-        else:
-            self.metrics_prefix=self.settings.adv.get(
-                f'{self.name}-prefix',self._default_metrics_prefix)
+            self.settings.adv[f'{self.name}-prefix']=metrics_prefix
+        self.metrics_prefix=self.settings.adv.setdefault(
+            f'{self.name}-prefix',self._default_metrics_prefix)
     
+
     def config_pdb_input_key(self,pdb_to_take:str|None=None):
         '''
-        recommend behavior:
         value in params > value in settings > default value
-        Note: 
-        this config method is not integrated in process_batch.
         '''
-        if pdb_to_take is None:
-            self._pdb_to_take=''
-        else:
-            self._pdb_to_take=pdb_to_take
+        if pdb_to_take is not None:
+            self.settings.adv[f'{self.name}-pdb-input']=pdb_to_take
+        self._pdb_to_take=self.settings.adv.setdefault(f'{self.name}-pdb-input',self._default_pdb_input_key)
+
+        # if pdb_to_take is None:
+        #     self._pdb_to_take=self.settings.adv.setdefault(f'{self.name}-pdb-input','')
+        # else:
+        #     self._pdb_to_take=pdb_to_take
+        #     self.settings.adv[f'{self.name}-pdb-input']=pdb_to_take
 
     @contextmanager
     def record_time(self,record:DesignRecord,time_key:Optional[str]=None):

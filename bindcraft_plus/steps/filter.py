@@ -44,10 +44,13 @@ class Filter(BaseStep):
         return input
 
     def process_batch(self,input:DesignBatch)->DesignBatchSlice:
+        '''
+        different from default behavior, Filter will always re-process records.
+        '''
         for records_id,record in input.records.items():
-            if input.overwrite or not self.check_processed(record):
-                self.process_record(record)
-                input.save_record(records_id)
+            # if input.overwrite or not self.check_processed(record):
+            self.process_record(record)
+            input.save_record(records_id)
         opt=input.filter(lambda x:x.get_metrics(self.metrics_prefix+'sum'))
         return opt
         

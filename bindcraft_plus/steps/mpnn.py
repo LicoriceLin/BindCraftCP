@@ -1,7 +1,7 @@
 from .basestep import BaseStep,DesignRecord,DesignBatch,DesignBatchSlice
 from ..utils import GlobalSettings,NEST_SEP
 from .scorer.diversity_util import simple_diversity,cluster_and_get_medoids
-from typing import Callable,Dict,List,Any
+from typing import Callable,Dict,List,Any,Tuple
 import pandas as pd
 import numpy as np
 import pickle as pkl
@@ -28,23 +28,40 @@ class MPNN(BaseStep):
     def metrics_to_add(self):
         return tuple([self.metrics_prefix+'score',self.metrics_prefix+'seqid'])
 
-    def config_pdb_input_key(self, pdb_to_take = None):
-        if pdb_to_take is None:
-            if self.settings.adv.get('templated',False):
-                self._pdb_to_take = self.settings.adv.get('template-pdb-key','template')
-            else:
-                self._pdb_to_take = self.settings.adv.get('template-pdb-key','halu')
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[
+            'templated','mpnn_backbone_noise','mpnn_model_path','mpnn_weights',
+            'mpnn_bias_recipe','n_mpnn_samples','max_mpnn_sequences','mpnn_sampling_temp', 
+            f'{self.name}-prefix',f'{self.name}-pdb-input',
+            "mpnn_binder_chain","mpnn_target_chain"
+            ]
+        return tuple(ret)
+    
+    @property
+    def _default_pdb_input_key(self):
+        if self.settings.adv.get('templated',False):
+            return 'halu'
         else:
-            self._pdb_to_take = pdb_to_take
+            return 'templated'
+        
+    # def config_pdb_input_key(self, pdb_to_take = None):
+    #     if pdb_to_take is None:
+    #         if self.settings.adv.setdefault('templated',False):
+    #             self._pdb_to_take = self.settings.adv.setdefault('template-pdb-key','template')
+    #         else:
+    #             self._pdb_to_take = self.settings.adv.setdefault('template-pdb-key','halu')
+    #     else:
+    #         self._pdb_to_take = pdb_to_take
 
     @property
     def mpnn_model(self):
         if getattr(self,'_mpnn_model',None) is None:
             adv=self.settings.adv
             self._mpnn_model=mk_mpnn_model(
-                backbone_noise=adv.get("mpnn_backbone_noise",0.),
-                model_name=adv.get("mpnn_model_path","v_48_020"),
-                weights=adv.get("mpnn_weights","soluble"),
+                backbone_noise=adv.setdefault("mpnn_backbone_noise",0.),
+                model_name=adv.setdefault("mpnn_model_path","v_48_020"),
+                weights=adv.setdefault("mpnn_weights","soluble"),
                 seed=self.settings.binder_settings.global_seed)
         return self._mpnn_model
     
@@ -61,7 +78,7 @@ class MPNN(BaseStep):
         return track_df
     
     def init_penalty_recipes(self):
-        bias_recipe_file=self.settings.adv.get(
+        bias_recipe_file=self.settings.adv.setdefault(
             'mpnn_bias_recipe','config/mpnn-default-recipe.json')
         with open(bias_recipe_file,'r') as f:
             bias_recipe:dict=json.load(f)
@@ -72,11 +89,17 @@ class MPNN(BaseStep):
     
     def run_mpnn(self,record:DesignRecord)->List[DesignRecord]:
         adv=self.settings.adv
-        n_mpnn_samples:int=adv.get("n_mpnn_samples",20)
-        max_mpnn_sequences:int=adv.get("max_mpnn_sequences",2)
-        temperature:float=adv.get("mpnn_sampling_temp",0.1)
-        binder_chain:str=self.settings.target_settings.new_binder_chain
-        full_target_chain=self.settings.target_settings.full_target_chain
+        n_mpnn_samples:int=adv.setdefault("n_mpnn_samples",20)
+        max_mpnn_sequences:int=adv.setdefault("max_mpnn_sequences",2)
+        temperature:float=adv.setdefault("mpnn_sampling_temp",0.1)
+        if 'template' in self.pdb_to_take:
+            default_mpnn_binder_chain=self.settings.target_settings.new_binder_chain
+            default_mpnn_target_chain=self.settings.target_settings.full_target_chain
+        else:
+            default_mpnn_binder_chain='B'
+            default_mpnn_target_chain='A'
+        binder_chain:str=adv.setdefault("mpnn_binder_chain",default_mpnn_binder_chain)
+        full_target_chain=adv.setdefault("mpnn_target_chain",default_mpnn_target_chain)
         
         bias=self.cal_bias(record)
         _fix_po=np.where(bias[:,-1]==0)[0]
@@ -85,7 +108,6 @@ class MPNN(BaseStep):
         
         length=len(record.sequence)
         pdb_file=record.pdb_files[self.pdb_to_take]
-
         self.mpnn_model.prep_inputs(pdb_file,
             f'{full_target_chain},{binder_chain}',fix_pos=fixed_positions)
         ori_score=self.mpnn_model.score(temperature=temperature)['score']
@@ -161,13 +183,11 @@ class MPNN(BaseStep):
                     input.save_record(record.id) 
                 else:
                     if sampled and isinstance(input,DesignBatchSlice):
-                        for mpnn_i in range(self.settings.adv.get("max_mpnn_sequences",2)):
+                        for mpnn_i in range(self.settings.adv.setdefault("max_mpnn_sequences",2)):
                             d_id=f'{records_id}-{mpnn_suffix}{mpnn_i+1}'
                             if d_id in input.parent.records and d_id not in input.records:
                                 input.add_record(input.parent[d_id])
 
-        # for i in new_designs:
-        #     input.add_record(i)
         return input
     
 _default_penalties_values=dict(

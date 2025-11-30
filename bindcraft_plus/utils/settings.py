@@ -5,9 +5,16 @@ from dataclasses import dataclass,field,fields
 from .utils import _iterate_set,_iterate_get,NEST_SEP
 from string import ascii_uppercase
 import os,json
+from pathlib import Path
 
 PathT=os.PathLike[str]|None
 BasicDict=Dict[str,str|bool|int|float]
+
+def _default_serialize(i):
+    if isinstance(i,Path):
+        return i.absolute()
+    else:
+        return str(i)
 @dataclass
 class BaseSettings(ABC):
     @property
@@ -16,7 +23,7 @@ class BaseSettings(ABC):
     
     def save(self,jsonfile:PathT):
         with open(jsonfile,'w') as f:
-            json.dump(self.settings,f,indent=2)
+            json.dump(self.settings,f,indent=2,default=str)
 
     @classmethod
     def from_dict(cls,d:dict):
@@ -41,13 +48,22 @@ class BaseSettings(ABC):
 
 @dataclass
 class TargetSettings(BaseSettings):
+    '''
+    Following configurations only works for epitope-only design:
+    full_target_pdb: path to intact target pdb
+    full_target_chain: chain id of intact target
+    full_binder_chain: the binder chain in hallu/refold output, usually B
+    new_binder_chain: the binder chain in grafted template. 
+                      Introduced to handle the situation where 'B' is in full_target_chain. 
+                      No need to be initialized. 
+    '''
     starting_pdb:str
     chains:str
     target_hotspot_residues:Optional[str]=None
     full_target_pdb:Optional[str]=None
-    full_target_chain:Optional[str]=None # 
-    full_binder_chain:str='B' # the binder chain in hallu/refold output, usually B
-    new_binder_chain:str=field(repr=False,init=False,default='') # the binder chain in grafted template 
+    full_target_chain:Optional[str]=None
+    full_binder_chain:str=field(repr=False,init=False,default='B')
+    new_binder_chain:str=field(repr=False,init=False,default='')
     def __post_init__(self):
         if self.full_target_chain is not None:
             if self.full_binder_chain in self.full_target_chain:

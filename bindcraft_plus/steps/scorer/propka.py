@@ -1,4 +1,4 @@
-from typing import List
+from typing import List,Tuple
 from propka.run import single
 from .basescorer import BaseScorer,GlobalSettings,DesignRecord,DesignBatch,NEST_SEP
 
@@ -34,7 +34,7 @@ def propka_record(record:DesignRecord,pdb_to_take:str,
 
 class AnnotPI(BaseScorer):
     def __init__(self, settings:GlobalSettings):
-        super().__init__(settings, score_func=propka_record)
+        super().__init__(settings, score_func=propka_record,decoupled=True)
 
     def _init_params(self):
         self.params=dict(
@@ -56,6 +56,10 @@ class AnnotPI(BaseScorer):
             return tuple([self.metrics_prefix+i for i in 
                 ['pi-fold','pi-unfold','pH-opt','dG-opt']])
         
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[f'{self.name}-prefix',f'{self.name}-pdb-input']
+        return tuple(ret)
     
     
         

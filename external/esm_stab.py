@@ -13,7 +13,7 @@ from typing import List
 
 IF_model_name='/hpf/projects/mkoziarski/zdeng/BindCraft/input/esm_if1_gvp4_t16_142M_UR50.pt'
 
-def run_model(coords,sequence,model,cmplx=False,chain_target='A'):
+def run_model(coords,sequence,model):
 
     device = next(model.parameters()).device
 
@@ -66,7 +66,7 @@ def esm_if_dG(pdb_file:str,chain_id:str)->pd.DataFrame:
     b=0.6162549378400894 ## fitting param from the manuscript to convert IF score scale to kcal/mol
     structure = load_structure(pdb_file, chain_id)
     coords_structure, sequence_structure = extract_coords_from_structure(structure)
-    prob_tokens = run_model(coords_structure,sequence_structure,model,chain_target=chain_id)
+    prob_tokens = run_model(coords_structure,sequence_structure,model)
     aa_list, wt_scores = score_variants(sequence_structure,prob_tokens,alphabet)
     dg_IF= np.nansum(wt_scores)
     # print('ΔG predicted (likelihoods sum): ',dg_IF)

@@ -1,0 +1,7 @@
+{
+  "starting_pdb": "bindcraft_plus/test/targets/WDR5-seg_6.pdb",
+  "chains": "B",
+  "target_hotspot_residues": "B47,B48,B49,B65,B89,B90,B91,B92,B107,B131,B133,B134,B175,B176,B191,B219,B259,B260,B261,B263,B305,B321,B322",
+  "full_target_pdb": "bindcraft_plus/test/targets/WDR5-full.pdb",
+  "full_target_chain": "B"
+}

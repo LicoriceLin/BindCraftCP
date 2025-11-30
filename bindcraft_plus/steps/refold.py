@@ -6,7 +6,7 @@ from string import ascii_uppercase
 from tqdm import tqdm
 class Refold(BaseStep):
     def __init__(self,settings:GlobalSettings):
-        self.templated=settings.adv.get('templated',False)
+        self.templated=settings.adv.setdefault('templated',False)
         super().__init__(settings)
         
     
@@ -17,20 +17,47 @@ class Refold(BaseStep):
     @property
     def metrics_to_add(self):
         prefix=self.metrics_prefix
-        ret=[f'{prefix}multimer-{n+1}' for n in self.prediction_models]
-        ret.extend([f'{prefix}monomer-{n+1}' for n in self.prediction_models])
+        ret=[]
+        for i in [f'{prefix}multimer-{n+1}' for n in self.prediction_models]:
+            for k in ['pLDDT','pTM','i-pTM','pAE','i-pAE']:
+                ret.append(f'{i}{NEST_SEP}{k}')
+        for i in [f'{prefix}monomer-{n+1}' for n in self.prediction_models]:
+            for k in ['pLDDT','pTM','pAE']:
+                ret.append(f'{i}{NEST_SEP}{k}')
+        ret.append(f'{prefix}best{NEST_SEP}i-pAE')
         return tuple(ret)
     
     @property
     def pdb_to_add(self):
-        return self.metrics_to_add
+        prefix=self.metrics_prefix
+        ret=[f'{prefix}multimer-{n+1}' for n in self.prediction_models]
+        ret.extend([f'{prefix}monomer-{n+1}' for n in self.prediction_models])
+        ret.append(f'{prefix}best')
+        return tuple(ret)
     
-    def config_pdb_input_key(self, pdb_to_take = None):
-        if pdb_to_take is None:
-            default='template' if self.templated else 'halu'
-            self._pdb_to_take=self.settings.adv.get('template-pdb-key',default)
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[
+            f'{self.name}-prefix',f'{self.name}-pdb-input',
+            'use_multimer_design','num_recycles_validation',
+            'rm_template_seq_predict','rm_template_sc_predict',
+            'rm_template_ic_predict','cyclize_peptide',
+        ]
+        return tuple(ret)
+    
+    @property
+    def _default_pdb_input_key(self):
+        if self.settings.adv.get('templated',False):
+            return 'halu'
         else:
-            self._pdb_to_take=pdb_to_take
+            return 'templated'
+        
+    # def config_pdb_input_key(self, pdb_to_take = None):
+    #     if pdb_to_take is None:
+    #         default='template' if self.templated else 'halu'
+    #         self._pdb_to_take=self.settings.adv.setdefault('template-pdb-key',default)
+    #     else:
+    #         self._pdb_to_take=pdb_to_take
     
     def config_complex_model(self,record:DesignRecord):
         '''
@@ -43,30 +70,35 @@ class Refold(BaseStep):
                 template_pdb=record.pdb_files[self.pdb_to_take]
             except:
                 raise ValueError(
-                    f'template-pdb-key `{self.pdb_to_take}` '
+                    f'{self.name}-pdb-input `{self.pdb_to_take}` '
                     'not found in `record.pdb_files`')
             
             if getattr(self,'current_template_pdb','')!=template_pdb:
                 self.current_template_pdb=template_pdb
+                if 'template' in self.pdb_to_take: #self.settings.adv.get('templated',False):
+                    chain,binder_chain=s.target_settings.full_target_chain,s.target_settings.new_binder_chain
+                else:
+                    chain,binder_chain='A',s.target_settings.full_binder_chain
+                # print(template_pdb,chain,binder_chain)
                 c_model.prep_inputs(
                     pdb_filename=template_pdb, 
-                    chain=s.target_settings.full_target_chain, 
-                    binder_chain=s.target_settings.new_binder_chain, 
+                    chain=chain, 
+                    binder_chain=binder_chain, 
                     binder_len=binder_len, 
                     use_binder_template=True, 
-                    rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                    rm_target_sc=advanced_settings["rm_template_sc_predict"], 
-                    rm_template_ic=advanced_settings.get("rm_template_ic_predict",True),
+                    rm_target_seq=advanced_settings.setdefault("rm_template_seq_predict",True),
+                    rm_target_sc=advanced_settings.setdefault("rm_template_sc_predict",True), 
+                    rm_template_ic=advanced_settings.setdefault("rm_template_ic_predict",True),
                     seed=s.binder_settings.global_seed)
         else:
             if getattr(c_model,'_binder_len',0) !=binder_len:
                 c_model.prep_inputs(pdb_filename=s.target_settings.starting_pdb, 
                         chain=s.target_settings.chains, 
                         binder_len=binder_len, 
-                        rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                        rm_target_sc=advanced_settings["rm_template_sc_predict"],
+                        rm_target_seq=advanced_settings.setdefault("rm_template_seq_predict",True),
+                        rm_target_sc=advanced_settings.setdefault("rm_template_sc_predict",True),
                         seed=s.binder_settings.global_seed)
-        if advanced_settings.get('cyclize_peptide',False):
+        if advanced_settings.setdefault('cyclize_peptide',False):
             add_cyclic_offset(c_model, offset_type=2)
             
     def config_monomer_model(self,record:DesignRecord):
@@ -112,6 +144,22 @@ class Refold(BaseStep):
         
         return record
     
+    def _sel_best_refold(self,record:DesignRecord):
+        refolder=self
+        prefix=refolder.metrics_prefix
+        if f'{prefix}best' in record.pdb_files:
+            return
+        ipaes=[]
+        for i in refolder.pdb_to_add:
+            if 'multimer' in i:
+                ipaes.append((i,record.get_metrics(f'{i}{NEST_SEP}i-pAE',1)))
+        ipaes.sort(key=lambda x:x[1])
+        if ipaes[0][0] in record.pdb_files:
+            record.pdb_files[f'{prefix}best']=record.pdb_files[ipaes[0][0]]
+        else:
+            record.pdb_strs[f'{prefix}best']=record.pdb_strs[ipaes[0][0]]
+        record.set_metrics(f'{prefix}best{NEST_SEP}i-pAE',ipaes[0][1])
+
     def purge_record(self,record:DesignRecord):
         '''
         create self.pdb_purge_dir/{multimer,monomer}
@@ -129,6 +177,7 @@ class Refold(BaseStep):
                 if refold_id_m in record.pdb_strs:
                     record.purge_pdb(refold_id_m,
                         self.pdb_purge_dir/'monomer'/f'{record.id}-{model_num+1}.pdb')
+            self._sel_best_refold(record)
 
     def config_pdb_purge(self, pdb_purge_stem = None):
         super().config_pdb_purge(pdb_purge_stem)
@@ -145,22 +194,23 @@ class Refold(BaseStep):
             d={k:(len(v.sequence),v.pdb_files[self.pdb_to_take]) for k,v in input.records.items()}
         return sorted(d,key=lambda k:d[k])
 
-    def check_processed(self,input: DesignRecord)->bool:
-        prefix=self.metrics_prefix
-        for model_num in self.prediction_models:
-            refold_id_c=f'{prefix}multimer-{model_num+1}'
-            if not input.has_pdb(refold_id_c):
-                return False
-            refold_id_m=f'{prefix}monomer-{model_num+1}'
-            if not input.has_pdb(refold_id_m):
-                return False
-        return True
+    # def check_processed(self,input: DesignRecord)->bool:
+    #     prefix=self.metrics_prefix
+    #     for model_num in self.prediction_models:
+    #         refold_id_c=f'{prefix}multimer-{model_num+1}'
+    #         if not input.has_pdb(refold_id_c):
+    #             return False
+    #         refold_id_m=f'{prefix}monomer-{model_num+1}'
+    #         if not input.has_pdb(refold_id_m):
+    #             return False
+    #     return True
     
     def process_record(self, input: DesignRecord)->DesignRecord:
         with self.record_time(input):
             self.config_complex_model(input)
             self.config_monomer_model(input)
             self.refold(input)
+            # self._sel_best_refold(input)
         return input    
     
     def process_batch(self, input:DesignBatch,
@@ -186,7 +236,7 @@ class Refold(BaseStep):
             self.config_metrics_prefix(metrics_prefix)
         if pdb_to_take is not None:
             self.config_pdb_input_key(pdb_to_take)
-        for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}:'):
+        for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}'):
             record=input.records[design_id]
             if not self.check_processed(record):
                 self.process_record(record)
@@ -200,8 +250,8 @@ class Refold(BaseStep):
     def complex_prediction_model(self):
         advanced_settings=self.settings.adv
         if getattr(self,'_complex_prediction_model',None) is None:
-            use_initial_guess=advanced_settings.get("predict_initial_guess",False)
-            use_initial_atom_pos=advanced_settings.get("predict_bigbang",False)
+            use_initial_guess=advanced_settings.setdefault("predict_initial_guess",False)
+            use_initial_atom_pos=advanced_settings.setdefault("predict_bigbang",False)
             self._complex_prediction_model = mk_afdesign_model(protocol="binder", 
                 num_recycles=advanced_settings["num_recycles_validation"], 
                 data_dir=advanced_settings["af_params_dir"], 
@@ -239,11 +289,20 @@ class Graft(BaseStep):
     def pdb_to_add(self):
         return tuple([self.metrics_prefix.strip(NEST_SEP)])
     
-    def config_pdb_input_key(self, pdb_to_take = None):
-        if pdb_to_take is None:
-            self._pdb_to_take=self.settings.adv.get('graft-ori-key','halu')
-        else:
-            self._pdb_to_take=pdb_to_take
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[f'{self.name}-prefix', 'graft-ori-key']
+        return tuple(ret)
+    
+    @property
+    def _default_pdb_input_key(self):
+        return 'halu'
+        
+    # def config_pdb_input_key(self, pdb_to_take = None):
+    #     if pdb_to_take is None:
+    #         self._pdb_to_take=self.settings.adv.setdefault('graft-ori-key','halu')
+    #     else:
+    #         self._pdb_to_take=pdb_to_take
 
     def graft_binder(self,record:DesignRecord,):
         ori_key=self.pdb_to_take
@@ -265,7 +324,6 @@ class Graft(BaseStep):
 
     def process_record(self,input: DesignRecord)->DesignRecord:
         self.graft_binder(input)
-        # self.purge_record(input)
         return input
 
                      

@@ -26,7 +26,7 @@ class Hallucinate(BaseStep):
         ret=[f'config:{i}' for i in ["helix",'length','seed']]
         prefix=self.metrics_prefix
         ret.extend([f'{prefix}pLDDT',f'{prefix}pTM',f'{prefix}i-pTM',f'{prefix}pAE',f'{prefix}i-pAE'])
-        if self.settings.adv.get('hallu_save_loss',False):
+        if self.settings.adv.setdefault('hallu_save_loss',False):
             ret.extend([f'{self.metrics_prefix}loss'])
         return tuple(ret)
     
@@ -34,6 +34,21 @@ class Hallucinate(BaseStep):
     def pdb_to_add(self):
         return tuple([self.metrics_prefix.strip(NEST_SEP)])
     
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[
+            'cyclize_peptide',"4stage-mcmc",
+            "af_params_dir","use_multimer_design","num_recycles_design","sample_models","hallu_save_loss",
+            "omit_AAs","rm_template_seq_design","rm_template_sc_design",
+            "weights_pae_intra","weights_plddt","weights_pae_inter","weights_con_intra","weights_con_inter",
+            "intra_contact_number","inter_contact_number","intra_contact_distance","inter_contact_distance",
+            "use_rg_loss","weights_rg","use_i_ptm_loss","weights_iptm","use_termini_distance_loss","weights_termini_loss",
+            "soft_iterations","temporary_iterations","hard_iterations","greedy_iterations",
+            "4stage-use-pssm","4stage_keep_best",
+            "mcmc_half_life_ratio","t_init_mcmc",f'{self.name}-prefix','verb',
+            ]
+        return tuple(ret)
+
     def init_afdesign_model(
         self,
         af_model:mk_afdesign_model|None=None,
@@ -41,9 +56,9 @@ class Hallucinate(BaseStep):
         advanced_settings=self.settings.adv
         if af_model is None:
             af_model = mk_afdesign_model(protocol="binder", debug=False, 
-                data_dir=advanced_settings['af_params_dir'], 
-                use_multimer=advanced_settings["use_multimer_design"], 
-                num_recycles=advanced_settings["num_recycles_design"],
+                data_dir=advanced_settings.setdefault('af_params_dir',''), 
+                use_multimer=advanced_settings.setdefault("use_multimer_design",True), 
+                num_recycles=advanced_settings.setdefault("num_recycles_design",1),
                 best_metric='loss')
         else:
             af_model.restart(seed=self.settings.binder_settings.global_seed)
@@ -52,7 +67,9 @@ class Hallucinate(BaseStep):
     def config_afdesign_model(self,length:int,seed:int,helicity_value:float):
         advanced_settings=self.settings.adv
         target_settings=self.settings.target_settings
-        rm_aa = advanced_settings["omit_AAs"] if advanced_settings["omit_AAs"] else None
+        rm_aa = advanced_settings.setdefault("omit_AAs",'') 
+        if not rm_aa:
+            rm_aa=None
         af_model=self.af_model
         af_model.prep_inputs(
             pdb_filename=target_settings.starting_pdb, 
@@ -61,55 +78,62 @@ class Hallucinate(BaseStep):
             hotspot=target_settings.target_hotspot_residues, 
             seed=seed, 
             rm_aa=rm_aa,
-            rm_target_seq=advanced_settings["rm_template_seq_design"], 
-            rm_target_sc=advanced_settings["rm_template_sc_design"])
+            rm_target_seq=advanced_settings.setdefault("rm_template_seq_design",False), 
+            rm_target_sc=advanced_settings.setdefault("rm_template_sc_design",False))
         self._current_design_seed=seed
-        if advanced_settings.get('cyclize_peptide',False):
+        if advanced_settings.setdefault('cyclize_peptide',False):
             # To implement: multi-chain target, scaffolding.
             add_cyclic_offset(af_model, offset_type=2)
         ### Update weights based on specified settings
-        af_model.opt["weights"].update({"pae":advanced_settings["weights_pae_intra"],
-                                        "plddt":advanced_settings["weights_plddt"],
-                                        "i_pae":advanced_settings["weights_pae_inter"],
-                                        "con":advanced_settings["weights_con_intra"],
-                                        "i_con":advanced_settings["weights_con_inter"],
-                                        })
-        af_model.opt["con"].update({"num":advanced_settings["intra_contact_number"],"cutoff":advanced_settings["intra_contact_distance"],"binary":False,"seqsep":9})
-        af_model.opt["i_con"].update({"num":advanced_settings["inter_contact_number"],"cutoff":advanced_settings["inter_contact_distance"],"binary":False})
+        af_model.opt["weights"].update({
+            "pae":advanced_settings.setdefault("weights_pae_intra",0.4),
+            "plddt":advanced_settings.setdefault("weights_plddt",0.1),
+            "i_pae":advanced_settings.setdefault("weights_pae_inter",0.1),
+            "con":advanced_settings.setdefault("weights_con_intra",1.0),
+            "i_con":advanced_settings.setdefault("weights_con_inter",1.0),
+            })
+        af_model.opt["con"].update({
+            "num":advanced_settings.setdefault("intra_contact_number",2),
+            "cutoff":advanced_settings.setdefault("intra_contact_distance",14),
+            "binary":False,"seqsep":9})
+        af_model.opt["i_con"].update({
+            "num":advanced_settings.setdefault("inter_contact_number",2),
+            "cutoff":advanced_settings.setdefault("inter_contact_distance",20),
+            "binary":False})
 
         ### additional loss functions
-        if advanced_settings.get("use_rg_loss",False):
-            add_rg_loss(af_model, advanced_settings["weights_rg"])
+        if advanced_settings.setdefault("use_rg_loss",False):
+            add_rg_loss(af_model, advanced_settings.setdefault("weights_rg",0.3))
 
-        if advanced_settings.get("use_i_ptm_loss",False):
-            add_i_ptm_loss(af_model, advanced_settings["weights_iptm"])
+        if advanced_settings.setdefault("use_i_ptm_loss",False):
+            add_i_ptm_loss(af_model, advanced_settings.setdefault("weights_iptm",0.05))
 
-        if advanced_settings.get("use_termini_distance_loss",False):
-            add_termini_distance_loss(af_model, advanced_settings["weights_termini_loss"])
+        if advanced_settings.setdefault("use_termini_distance_loss",False):
+            add_termini_distance_loss(af_model, advanced_settings.setdefault("weights_termini_loss",1.))
         add_helix_loss(af_model, helicity_value)
 
     def sample_trajectory(self,input:DesignRecord)->DesignRecord:
         prefix=self.metrics_prefix
         af_model=self.af_model
         advanced_settings=self.settings.adv
-        design_models = [0,1,2,3,4] if advanced_settings["use_multimer_design"] else [0,1]
-        verb=advanced_settings.get('verb',1)
+        design_models = [0,1,2,3,4] if advanced_settings.setdefault("use_multimer_design",True) else [0,1]
+        verb=advanced_settings.setdefault('verb',1)
         if verb: 
             print("Running SGD-based hallucination...")
-        af_model.design_logits(iters=advanced_settings["soft_iterations"], e_soft=1, models=design_models, num_models=1, sample_models=advanced_settings["sample_models"],
-            ramp_recycles=False, save_best=True,verbose=verb)
-        af_model.design_soft(advanced_settings["temporary_iterations"], e_temp=1e-2, models=design_models, num_models=1,
+        af_model.design_logits(iters=advanced_settings.setdefault("soft_iterations",75), e_soft=1, models=design_models, num_models=1, 
+            sample_models=advanced_settings.setdefault("sample_models",True), ramp_recycles=False, save_best=True,verbose=verb)
+        af_model.design_soft(advanced_settings.setdefault("temporary_iterations",45), e_temp=1e-2, models=design_models, num_models=1,
             sample_models=advanced_settings["sample_models"], ramp_recycles=False, save_best=True,verbose=verb)
-        af_model.design_hard(advanced_settings["hard_iterations"], temp=1e-2, models=design_models, num_models=1,
+        af_model.design_hard(advanced_settings.setdefault("hard_iterations",5), temp=1e-2, models=design_models, num_models=1,
             sample_models=advanced_settings["sample_models"], dropout=False, ramp_recycles=False, save_best=True,verbose=verb)
-        if advanced_settings["greedy_iterations"]>0:
-            greedy_tries = math.ceil(af_model._binder_len * (advanced_settings["greedy_percentage"] / 100))
+        if advanced_settings.setdefault("greedy_iterations",15)>0:
+            greedy_tries = math.ceil(af_model._binder_len * (advanced_settings.setdefault("greedy_percentage",5) / 100))
             af_model.clear_best()
-            if advanced_settings.get('4stage-use-pssm',False):
+            if advanced_settings.setdefault('4stage-use-pssm',False):
                 seq_logits = None
             else:
                 seq_logits = af_model.aux["seq"]["pssm"][0]
-            if not advanced_settings.get('4stage-mcmc',False):
+            if not advanced_settings.setdefault('4stage-mcmc',False):
                 af_model.design_pssm_semigreedy(
                     soft_iters=0, hard_iters=advanced_settings["greedy_iterations"], tries=greedy_tries, models=design_models, 
                     num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True,
@@ -117,12 +141,12 @@ class Hallucinate(BaseStep):
             else:
                 af_model._design_mcmc(
                     steps=advanced_settings["greedy_iterations"], 
-                    half_life=int(advanced_settings["greedy_iterations"]*advanced_settings.get('mcmc_half_life_ratio',0.2)), 
-                    seq_logits=seq_logits,T_init=advanced_settings.get('t_init_mcmc',0.01), 
+                    half_life=int(advanced_settings["greedy_iterations"]*advanced_settings.setdefault('mcmc_half_life_ratio',0.2)), 
+                    seq_logits=seq_logits,T_init=advanced_settings.setdefault('t_init_mcmc',0.01), 
                     mutation_rate=greedy_tries, num_models=1, 
                     models=design_models,
                     sample_models=advanced_settings["sample_models"], save_best=True,verbose=verb)
-            if advanced_settings.get('4stage_keep_best',False):
+            if advanced_settings.setdefault('4stage_keep_best',False):
                 best = af_model._tmp["best"]
                 af_model.aux, seq = best["aux"], jnp.array(best["aux"]["seq"]['input'])
                 af_model.set_seq(seq=seq, bias=af_model._inputs["bias"])
@@ -130,7 +154,7 @@ class Hallucinate(BaseStep):
         
         metrics={k:af_model.aux['log'][v] for k,v in {f'{prefix}pLDDT':'plddt',f'{prefix}pTM':'ptm',f'{prefix}i-pTM':'i_ptm',f'{prefix}pAE':'pae',f'{prefix}i-pAE':'i_pae'}.items()}
         # metrics.update({"helix":af_model.opt["weights"]["helix"],'length':af_model._binder_len,'seed':self._current_design_seed})
-        if advanced_settings.get('hallu_save_loss',False):
+        if advanced_settings.setdefault('hallu_save_loss',False):
             metrics[f'{prefix}loss'] = af_model.aux['log']['loss']
         pdbstr=af_model.save_pdb()
         input.sequence=af_model.get_seq(get_best=False)[0]

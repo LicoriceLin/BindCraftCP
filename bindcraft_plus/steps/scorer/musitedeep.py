@@ -7,6 +7,7 @@ from typing import Dict,Tuple,List,Callable
 from functools import partial
 import numpy as np
 single_mutsite_parse=Dict[str,List[Tuple[int,str,float]]]
+import tqdm
 
 AVAILABLE_PTM=[
     'Hydroxylysine',
@@ -64,32 +65,32 @@ def musite_on_fasta(fasta:str,model:str,
     return o
 
 
-def run_musite(batch:DesignBatch,model:str,
-    env:str='musite',repo_dir:str="../MusiteDeep_web",
-    metrics_prefix:str=''):
-    if '/' in env:
+def run_musite(batch:DesignBatch,ptm_type:str,
+    musite_env:str='musite',musite_repo:str="../MusiteDeep_web",
+    metrics_prefix:str='',pdb_to_take:str=''):
+    if '/' in musite_env:
         flag='-p'
     else:
         flag='-n'
     
     with tempfile.TemporaryDirectory() as tdir:
         batch.to_fasta(f'{tdir}/in.fa')
-        run(['conda','run',flag,env,
+        run(['conda','run',flag,musite_env,
             'python',
             'predict_multi_batch.py',
             '-input',f'{tdir}/in.fa',
-            '-output',f'{tdir}/{model}',
-            '-model-prefix',f'models/{model}',],
-            cwd=f'{repo_dir}/MusiteDeep',
+            '-output',f'{tdir}/{ptm_type}',
+            '-model-prefix',f'models/{ptm_type}',],
+            cwd=f'{musite_repo}/MusiteDeep',
             stdout=DEVNULL,stderr=DEVNULL)
-        o=parse_musite_single(f'{tdir}/{model}_results.txt')
+        o=parse_musite_single(f'{tdir}/{ptm_type}_results.txt')
     
     for record_id,record, in batch.records.items():
         entry=o.get(record_id,[])
         track=np.zeros((len(record.sequence),)).astype(float)
         for i in entry:
             track[i[0]-1]+=i[2]
-        record.ana_tracks[f'{metrics_prefix}{model}']=[round(i,2) for i in track]
+        record.ana_tracks[f'{metrics_prefix}{ptm_type}']=[round(i,2) for i in track]
     
     return batch
 
@@ -100,22 +101,33 @@ class AnnotPTM(BaseScorer):
 
     def _init_params(self):
         self.params=dict(
-        model='O-linked_glycosylation',
-        env=self.settings.adv.get('musite_env','musite'),
-        repo_dir=self.settings.adv.get('musite_repo',"../MusiteDeep_web"),
+        ptm_type=self.settings.adv.setdefault('ptm_type','O-linked_glycosylation') ,
+        musite_env=self.settings.adv.setdefault('musite_env','musite'),
+        musite_repo=self.settings.adv.setdefault('musite_repo',"../MusiteDeep_web"),
         metrics_prefix=self.metrics_prefix)
 
     @property
     def name(self)->str:
-        return 'PTM-annot'
+        # print(self.params.keys())
+        if "ptm_type" in self.params:
+            return f'PTM-annot-{self.params["ptm_type"]}'
+        else:
+            return 'PTM-annot'
     
+    @property
+    def params_to_take(self)->Tuple[str,...]:
+        ret=[f'{self.name}-prefix',
+            'ptm_type','musite_env','musite_repo',
+            ]
+        return tuple(ret)
+
     @property
     def track_to_add(self):
         return tuple([f'{self.metrics_prefix}{self.current_ptm}'])
 
     @property
     def current_ptm(self):
-        return self.params['model']
+        return self.params['ptm_type']
 
     @property
     def avail_ptm(self):
@@ -134,6 +146,7 @@ class AnnotPTM(BaseScorer):
     def process_batch(self, input:DesignBatch, **kwargs):
         self.config_params(**kwargs)
         sub_batch=input.filter(lambda i: not self.check_processed(i))
+        tqdm.tqdm.write(f'annotating {self.params["ptm_type"]}')
         if len(sub_batch)>0:
             self.score_func(sub_batch)
             sub_batch.save_records()

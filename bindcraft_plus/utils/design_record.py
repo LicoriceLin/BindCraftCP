@@ -203,9 +203,11 @@ class DesignBatch:
     def log_json(self):
         return self.cache_dir/'metrics.json'
 
-    def __getitem__(self,key:str|Iterable[str]):
+    def __getitem__(self,key:str|int|Iterable[str]):
         if isinstance(key,str):
             return self.records[key]
+        elif isinstance(key,int):
+            return list(self.records.values())[key]
         else:
             return DesignBatchSlice(self,key)
         

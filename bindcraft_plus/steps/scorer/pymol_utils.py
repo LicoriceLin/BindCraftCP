@@ -7,6 +7,15 @@ from typing import Optional,List,Tuple,Dict
 from pathlib import Path
 
 ### pre-process ###
+def default_vis_config():
+    cmd.set('ray_trace_mode',1)
+    cmd.set('ray_shadow','off')
+    cmd.set('antialias',2)
+    cmd.set('ambient',0.6)
+    cmd.set('specular',0.5)
+    cmd.set('reflect',0.2)
+    cmd.set('ray_opaque_background',0)
+
 def no_organic_purify(obj:str):
     cmd.remove(f'{obj} and not polymer')
     cmd.h_add(obj)
@@ -73,8 +82,6 @@ def iterate_resi(chain:str,obj:str='',only_canonical:bool=True)->str:
             )
         return '( index '+ ','.join(o.values())+ ' )'
     
-
-
 def rSASA(obj:str,chain:str):
     _cal_sasa(obj)
     residues = {}
