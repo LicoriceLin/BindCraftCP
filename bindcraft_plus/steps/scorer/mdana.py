@@ -1,7 +1,7 @@
 import MDAnalysis as mda
 from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
 from MDAnalysis.analysis.distances import distance_array
-# from MDAnalysis.analysis.base import AnalysisFromFunction
+from MDAnalysis.analysis.base import AnalysisFromFunction
 from typing import List,Dict,Tuple
 import pandas as pd
 import numpy as np
@@ -165,16 +165,47 @@ def annot_polar_occupy(record:DesignRecord,pdb_to_take:str,
     record.ana_tracks[f'{metrics_prefix}salt-bridge']=salt_track.tolist()
     record.ana_tracks[f'{metrics_prefix}unsat_ppi_polar']=unsat_ppi_polar.tolist()
     record.ana_tracks[f'{metrics_prefix}aatype']=aatype_track.tolist()
+    record.set_metrics('aux:rog',cal_rog(pdbfile,ligand_chain))
     if ret_misc:
         record.ana_tracks['misc:polar_occ']={
             'sb':salt_bridge_ret,
             'hb':hbond_ret}
     return record
 
-    
+def radgyr(atomgroup, masses, total_mass=None):
+    # coordinates change for each frame
+    coordinates = atomgroup.positions
+    center_of_mass = atomgroup.center_of_mass()
+
+    # get squared distance from center
+    ri_sq = (coordinates-center_of_mass)**2
+    # sum the unweighted positions
+    sq = np.sum(ri_sq, axis=1)
+    sq_x = np.sum(ri_sq[:,[1,2]], axis=1) # sum over y and z
+    sq_y = np.sum(ri_sq[:,[0,2]], axis=1) # sum over x and z
+    sq_z = np.sum(ri_sq[:,[0,1]], axis=1) # sum over x and y
+
+    # make into array
+    sq_rs = np.array([sq, sq_x, sq_y, sq_z])
+
+    # weight positions
+    rog_sq = np.sum(masses*sq_rs, axis=1)/total_mass
+    # square root and return
+    return np.sqrt(rog_sq)
+
+def cal_rog(pdbfile:str,ligand_chain:str='B'):
+    u=mda.Universe(pdbfile,dt=1)
+    binder=u.select_atoms(f'segid {ligand_chain}')
+    rog = AnalysisFromFunction(radgyr, u.trajectory,
+                            binder, binder.masses,
+                            total_mass=np.sum(binder.masses))
+    rog.run()
+    return rog.results['timeseries'][0,0]
+
 class AnnotPolarOccupy(BaseScorer):
     '''
     Designed to work with relaxed conformation.
+    TMP: RoG calculation is inserted here for convenience. Should be decoupled.  
     '''
     def __init__(self, settings:GlobalSettings):
         super().__init__(settings,score_func=annot_polar_occupy,decoupled=True)

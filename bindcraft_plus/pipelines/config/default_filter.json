@@ -35,15 +35,51 @@
           "higher": false
         }
     }
+    },
+    "rst":{
+      "binder_score": {
+          "threshold": 0,
+          "higher": false
+        },
+      "dG": {
+          "threshold": 0,
+          "higher": false
+        },
+      "dSASA": {
+          "threshold": 1,
+          "higher": true
+        },
+      "shape_complementarity": {
+          "threshold": 0.6,
+          "higher": true
+        },
+      "hbond": {
+          "threshold": 3,
+          "higher": true
+        },
+      "unsat_hbond": {
+          "threshold": 4,
+          "higher": false
+        }
+      
+    },
+    "aux":{
+      "surf_hydro": {
+          "threshold": 0.65,
+          "higher": false
+        }
     }
+  
   },
   "recipes": {
     "after:hallucinate": [
       "halu"
     ],
     "after:refold": [
-      "refold:multimer-1",
-      "refold:multimer-2"
+      "refold"
+    ],
+    "final": [
+      "rst","aux"
     ]
   }
 }

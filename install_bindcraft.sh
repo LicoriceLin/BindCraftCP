@@ -130,3 +130,6 @@ echo -e "Successfully finished BindCraft installation!\n"
 echo -e "Activate environment using command: \"$pkg_manager activate BindCraft\""
 echo -e "\n"
 echo -e "Installation took $(($t / 3600)) hours, $((($t / 60) % 60)) minutes and $(($t % 60)) seconds."
+
+#TODO: install MDAnalysis PyMol ProPKA 
+#Env Setup for musitedeep.
