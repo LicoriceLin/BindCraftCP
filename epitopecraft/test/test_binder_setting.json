@@ -1,0 +1,15 @@
+{
+    "design_path": "output/test",
+    "binder_name": "tseg6",
+    "binder_lengths": [
+        12,
+        16
+    ],
+    "random_seeds": [
+        0,
+        1
+    ],
+    "helix_values": [
+        -0.3
+    ]
+}
