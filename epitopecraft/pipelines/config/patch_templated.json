@@ -1,7 +1,7 @@
 {
     "templated": true,
     "predict_initial_guess":true,
-    "predict_bigbang":true,
+    "predict_initial_atom_pos":true,
     "rm_template_seq_predict":true,
     "rm_template_sc_predict":true,
     "rm_template_ic_predict":true

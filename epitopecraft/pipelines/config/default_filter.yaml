@@ -49,10 +49,13 @@ thresholds:
     surf_hydro:
       threshold: 0.65
       higher: false
+    kappa2:
+      threshold: 0.4
+      higher: false
   pi-fold:
     threshold: 4.5
     higher: true
 recipes:
   after:hallucinate: [halu]
-  after:refold: [refold]
-  final: [rst, aux, pi-fold]
+  after:refold: [refold,aux:kappa2]
+  final: [rst, aux:surf_hydro, pi-fold]

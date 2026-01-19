@@ -275,7 +275,7 @@ _ss_code_map={
     }
 _ss_code_map_r={c:k for k,v in _ss_code_map.items() for c in v}
 
-def cal_dssp(pdb_file:str,chain_id="B",dssp_path:str='bindcraft_plus/steps/dssp'):
+def cal_dssp(pdb_file:str,chain_id="B",dssp_path:str='epitopecraft/steps/dssp'):
     '''
     Helix/H: H(alpha-helix), G(3-helix), I(5-helix); 
     Sheet/E: E(extended strand); 
@@ -302,6 +302,7 @@ def cal_aux_scores(record:DesignRecord,
     # ligand_chain:str='B',
     metrics_prefix:str='',
     cyclize_peptide:bool=False,
+    dssp_path:str='epitopecraft/steps/dssp'
     ):
     '''
     Cal essential auxiliary scores from BindCraft. 
@@ -315,7 +316,7 @@ def cal_aux_scores(record:DesignRecord,
     pdb_file=record.pdb_files[pdb_to_take['pdb_key']]
     ligand_chain=pdb_to_take['binder_chain']
     (record.ana_tracks[f'{metrics_prefix}SS8'],record.ana_tracks[f'{metrics_prefix}SS3']
-        )=cal_dssp(pdb_file,ligand_chain)
+        )=cal_dssp(pdb_file,ligand_chain,dssp_path=dssp_path)
     record.ana_tracks[f'{metrics_prefix}pLDDT']=fetch_bfactor(pdb_file,ligand_chain)
     record.set_metrics(f'{metrics_prefix}aux:relaxed_clashes',calculate_clash_score(pdb_file) )
     interface_score,_1,_2=score_interface(pdb_file, ligand_chain,cyclize_peptide=cyclize_peptide)
@@ -334,6 +335,9 @@ def cal_aux_scores(record:DesignRecord,
 class AnnotBCAux(BaseScorer):
     def __init__(self, settings:GlobalSettings):
         super().__init__(settings,score_func=cal_aux_scores)
+        dalphaball_path=self.settings.adv.setdefault(
+            'dalphaball_path','epitopecraft/steps/DAlphaBall.gcc')
+        init_pr(dalphaball_path)
 
     @property
     def name(self)->str:
@@ -353,6 +357,7 @@ class AnnotBCAux(BaseScorer):
             # ligand_chain=self.pdb_to_take['binder_chain'],
             metrics_prefix=self.metrics_prefix,
             cyclize_peptide=self.settings.adv.setdefault('cyclize_peptide',False),
+            dssp_path=self.settings.adv.setdefault('dssp_path','epitopecraft/steps/dssp'),
             )
         
     @property

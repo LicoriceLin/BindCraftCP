@@ -9,6 +9,7 @@ rm_template_seq_design: false # remove target template sequence for design (incr
 rm_template_seq_predict: false # remove target template sequence for reprediction (increases target flexibility)
 rm_template_sc_design: false # remove sidechains from target template for design
 rm_template_sc_predict: false # remove sidechains from target template for reprediction
+rm_template_ic_predict: true # removing interchain contacts from refold template
 
 soft_iterations: 75 # number of soft iterations (all amino acids considered at all positions)
 temporary_iterations: 45 # number of temporary iterations (softmax, most probable amino acids considered at all positions)
@@ -40,7 +41,6 @@ weights_rg: 0.3 # Design weight - radius of gyration weight for binder
 # Refold Helper
 predict_initial_guess: false # providing hallucinated conformation as starting point for refold validation. 
 predict_initial_atom_pos: false # providing hallucinated conformation as initilization coords for refold validation.
-rm_template_ic_predict: true # removing interchain contacts from refold template
 
 # Control MPNN Redesign
 mpnn_bias_recipe: epitopecraft/pipelines/config/mpnn-default-recipe.json # path to recipe controlling MPNN bias

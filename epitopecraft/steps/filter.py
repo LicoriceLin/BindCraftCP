@@ -12,7 +12,7 @@ class Filter(BaseStep):
         self.set_recipe('all')
 
     def set_recipe(self,recipe:str)->"Filter":
-        assert recipe=='all' or recipe in self.f_set.recipes
+        assert recipe=='all' or recipe in self.f_set.recipes,f'unkown recipe: {recipe}'
         self.current_recipe=recipe
         self.current_threshold=self.f_set.recipe_threshold(recipe)
         return self

@@ -8,8 +8,6 @@ from ..utils import (
 from ..steps import BaseStep
 _dir_path=Path(__file__).parent
 
-
-
 class BasePipeline(ABC):
     def __init__(self,
         global_settings:str|GlobalSettings,
@@ -19,7 +17,7 @@ class BasePipeline(ABC):
         if isinstance(global_settings,GlobalSettings):
             self.settings=global_settings
         else:
-            self.settings=GlobalSettings.from_json(global_settings)
+            self.settings=GlobalSettings.from_file(global_settings)
         self.design_path=Path(self.settings.binder_settings.design_path)
         self.design_path.mkdir(exist_ok=True)
         self._save_settings()
@@ -67,15 +65,15 @@ class BasePipeline(ABC):
         ret={}
         for k,v in self.steps.items():
             ret[k]=v.params_to_take
-            # ret.extend()
         ret['pipeline']=self.pipeline_params
-        # ret.extend(self.pipeline_params)
         return ret #tuple(set(ret))
 
     @property
     def pipeline_params(self)->Tuple[str,...]:
         return tuple([])
 
-    def _save_settings(self):
+    def _save_settings(self,stem:str|None=None):
+        if stem is None:
+            stem = self.settings.binder_settings.binder_name
         self.settings.save(
-            self.design_path/f'{self.settings.binder_settings.binder_name}.json')
+            self.design_path/f'{stem}.yaml')

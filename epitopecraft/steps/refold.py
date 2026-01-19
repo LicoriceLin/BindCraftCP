@@ -116,7 +116,6 @@ class Refold(BaseStep):
         c_model,m_model=self.complex_prediction_model,self.binder_prediction_model
         binder_sequence=record.sequence
         advanced_settings,s=self.settings.adv,self.settings
-        
         for model_num in self.prediction_models:
             refold_id_c=f'{prefix}multimer-{model_num+1}'
             if refold_id_c not in record.metrics:
@@ -194,17 +193,6 @@ class Refold(BaseStep):
             d={k:(len(v.sequence),v.pdb_files[self.pdb_to_take]) for k,v in input.records.items()}
         return sorted(d,key=lambda k:d[k])
 
-    # def check_processed(self,input: DesignRecord)->bool:
-    #     prefix=self.metrics_prefix
-    #     for model_num in self.prediction_models:
-    #         refold_id_c=f'{prefix}multimer-{model_num+1}'
-    #         if not input.has_pdb(refold_id_c):
-    #             return False
-    #         refold_id_m=f'{prefix}monomer-{model_num+1}'
-    #         if not input.has_pdb(refold_id_m):
-    #             return False
-    #     return True
-    
     def process_record(self, input: DesignRecord)->DesignRecord:
         with self.record_time(input):
             self.config_complex_model(input)
@@ -242,6 +230,7 @@ class Refold(BaseStep):
                 self.process_record(record)
                 self.purge_record(record)
                 input.save_record(design_id)
+        self.current_template_pdb=''
         return input
 
         # return super().__call__(input)
@@ -291,18 +280,12 @@ class Graft(BaseStep):
     
     @property
     def params_to_take(self)->Tuple[str,...]:
-        ret=[f'{self.name}-prefix', 'graft-ori-key']
+        ret=[f'{self.name}-prefix', 'graft-pdb-input']
         return tuple(ret)
     
     @property
     def _default_pdb_input_key(self):
         return 'halu'
-        
-    # def config_pdb_input_key(self, pdb_to_take = None):
-    #     if pdb_to_take is None:
-    #         self._pdb_to_take=self.settings.adv.setdefault('graft-ori-key','halu')
-    #     else:
-    #         self._pdb_to_take=pdb_to_take
 
     def graft_binder(self,record:DesignRecord,):
         ori_key=self.pdb_to_take

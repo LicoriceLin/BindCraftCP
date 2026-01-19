@@ -17,7 +17,7 @@ _pre_process_dict:Dict[str,Callable[[str],None]]={
     'only_polymer':no_organic_purify,
     }
 
-def known_binder_motifs(
+def known_binder_range_motifs(
     pdb:str,
     target_chain:str,
     ligand_chain:str,
@@ -25,6 +25,9 @@ def known_binder_motifs(
     output_dir:str='motif',
     epitope_ranges:List[int]=[4,6,8,10,12,14]
     ):
+    '''
+    legacy
+    '''
     stem=Path(pdb).stem
     Path(output_dir).mkdir(exist_ok=True,parents=True)
     cmd.load(pdb,stem+'_ori')
@@ -56,3 +59,47 @@ def known_binder_motifs(
         k = f'epitope_{i}'
         cmd.select(k,f'byres ( (target and chain {",".join(target_chains)}) within {i} of hotspots)')
     cmd.save(f'{output_dir}/{stem}.pse')
+
+def known_binder_topk_motifs(
+    pdb:str,
+    target_chain:str,
+    ligand_chain:str,
+    pre_process:Literal['only_organic','only_polymer']='only_polymer',
+    output_dir:str='motif',
+    topk_ranges:List[int]=[50,100,150,200,250,300],
+    stem:str|None=None
+    ):
+    if stem is None:
+        stem=Path(pdb).stem
+    Path(output_dir).mkdir(exist_ok=True,parents=True)
+    cmd.load(pdb,stem+'_ori')
+    _pre_process_dict[pre_process](stem+'_ori')
+    hotspots=hotspots_by_ligand(stem+'_ori',
+        target_chain,ligand_chain)
+    cmd.save(f'{output_dir}/{stem}-full.pdb','target')
+    hotspot_list=hotspots['hotspots']
+    with open(f'{output_dir}/{stem}-hotspot.json','w') as f:
+        json.dump({'hotspots':hotspot_list},f,indent=2)
+
+    other_res_sorted_list=sort_distance_to_hotspots('target',hotspot_list)
+    for i in topk_ranges:
+        top_k_list=top_k_epitope('target',hotspot_list,other_res_sorted_list,k=i)
+        cmd.save(f'{output_dir}/{stem}-{i}.pdb',f'target_top{i}')
+
+    # visualization
+    res=_reduce_hotspot_list(hotspot_list)
+    res_sel=[]
+    for k,v in res.items():
+        res_sel.append(f'(chain {k} and resi {",".join([str(i) for i in v])})')
+    cmd.select('hotspots',f'target and ( {" or ".join(res_sel) } )')
+    target_chains=cmd.get_chains('target')
+    binder_chain=[i for i in cmd.get_chains('complex') if i not in target_chains]
+    cmd.disable(stem+'_ori')
+    cmd.disable('complex')
+    cmd.remove('hydro')
+    cmd.show('licorice','hotspots')
+    cmd.color('warmpink','hotspots and element C')
+    cmd.save(f'{output_dir}/{stem}.pse')
+    cmd.delete('complex')
+    cmd.delete('target')
+    cmd.delete(f'{stem}_ori')

@@ -1,0 +1,6 @@
+{
+    "No-C-No-PPI":{
+        "select_func_expr":"lambda s: s['seq']=='C'",
+        "penalties_aas":{"No":"C"}
+        }
+    }

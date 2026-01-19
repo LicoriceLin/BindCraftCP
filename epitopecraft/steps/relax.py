@@ -127,9 +127,7 @@ class Relax(BaseStep):
     
     def init_pr(self):
         dalphaball_path=self.settings.adv.setdefault(
-            'dalphaball_path','bindcraft_plus/steps/DAlphaBall.gcc')
-        if not dalphaball_path: 
-            dalphaball_path='bindcraft_plus/steps/DAlphaBall.gcc'
+            'dalphaball_path','epitopecraft/steps/DAlphaBall.gcc')
         init_pr(dalphaball_path)
 
     @property

@@ -132,14 +132,27 @@ def hotspots_by_ligand(obj:str,target_chain:str,ligand_chain:str):
 def _reduce_hotspot_list(hotspots:List[Tuple[str,str]]):
     res={}
     for h in hotspots:
-        res.setdefault(h[0],[]).append(int(h[1]))
+        res.setdefault(h[0],[]).append(h[1]) #int(h[1])
     return res
 
+def _sort_resi_list(resi_list:List[str]):
+    def key(s):
+        if s[-1].isalpha():  
+            return int(s[:-1]), s[-1]
+        return int(s), '' 
+    return sorted(resi_list, key=key)
+
 def hotspots_to_seg_continue(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='continue_seg',pad=25):
+    def _tmp(s:str):
+        if s[-1].isalpha():  
+            return int(s[:-1])
+        return int(s)
     res=_reduce_hotspot_list(hotspots)
     res_be=[]
     for k,v in res.items():
-        res_be.append(f'(chain {k} and resi {max(min(v)-pad,1)}-{max(v)+pad})')
+        v=_sort_resi_list(v)
+        min_v,max_v=_tmp(v[0]),_tmp(v[-1])
+        res_be.append(f'(chain {k} and resi {max(min_v-pad,1)}-{max_v+pad})')
     cmd.copy_to(opt_obj,f'{obj} and ( {" or ".join(res_be) } )')
 
 def hotspots_to_seg_surf(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='surf',vicinity=10):
@@ -152,7 +165,7 @@ def hotspots_to_seg_surf(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='surf
 
 ### RMSD calculation ###
 def partial_align(mobile:str,mobile_sel:str,target:str,
-    mobile_rms_sel:str|None, target_sel:str|None=None,target_rms_sel:str|None=None):
+    mobile_rms_sel:str|None=None, target_sel:str|None=None,target_rms_sel:str|None=None):
     if target_sel is None:
         target_sel=mobile_sel
     if mobile_rms_sel is None:
@@ -168,3 +181,47 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.delete(f'{target}-aln')
     ret2=cmd.align(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' ,cycles=0,transform=0)[0]
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
+
+
+def sort_distance_to_hotspots(obj:str,hotspot_list:list)->list:
+    '''
+    obj: curated pymol object (e.g. no water/ions, no alt)
+    hotspot_list: [('A',12),('A',17),('B',5),...]
+
+    return: same format as hotspot_list
+    '''
+    res=_reduce_hotspot_list(hotspot_list)
+    res_sel=[]
+    for k,v in res.items():
+        res_sel.append(f'(chain {k} and resi {",".join([str(i) for i in v])})')
+    cmd.select('hotspots',f'{obj} and ( {" or ".join(res_sel) } )')
+    ref_coord=cmd.get_coords('hotspots and name CA')
+
+    o=[]
+    cmd.iterate_state(0,
+        f'({obj} and chain {",".join(res.keys())}) and (not hotspots) and name CA',
+        'o.append([(chain,resi),[x,y,z]])',space={'o':o}
+        )
+    cmd.delete('hotspots')
+    other_coord=np.array([i[1] for i in o])
+    other_res=[i[0] for i in o]
+    dis=np.sqrt(np.sum((other_coord[:,None,:]-ref_coord[None,:,:])**2,axis=2))
+    order = np.argsort(dis.min(axis=1))
+    other_res_sorted = [other_res[i] for i in order]
+    return other_res_sorted
+
+def top_k_epitope(obj:str,hotspot_list:list,other_res_sorted_list:list,k=100):
+    more_needed=k - len(hotspot_list)
+    remaining=len(other_res_sorted_list)
+
+    if more_needed<0 or more_needed>remaining:
+        raise ValueError
+    else:
+        sum_list = hotspot_list+other_res_sorted_list[:more_needed]
+
+    res=_reduce_hotspot_list(sum_list)
+    res_sel=[]
+    for k_,v in res.items():
+        res_sel.append(f'(chain {k_} and resi {",".join([str(i) for i in v])})')
+    cmd.select(f'{obj}_top{k}',f'{obj} and ( {" or ".join(res_sel) } )')
+    return sum_list

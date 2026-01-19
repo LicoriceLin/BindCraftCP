@@ -159,25 +159,29 @@ class BinderSettings(BaseSettings):
 class AdvancedSettings(BaseSettings):
     advanced_paths:List[str] #sequentially override
     extra_patch: dict = field(repr=False, default_factory=dict)
-    _settings: dict = field(init=False, repr=False, default_factory=dict)
+    _settings: dict = field(init=True, repr=False, default_factory=dict)
 
     def __post_init__(self):
-        for file in self.advanced_paths:
-            self._settings.update(_load_json_or_yaml(file))
-        self._settings.update(self.extra_patch)
+        if len(self._settings)==0:
+            for file in self.advanced_paths:
+                if os.path.isfile(file):
+                    self._settings.update(_load_json_or_yaml(file))
+                else:
+                    if file.lower() != 'none':
+                        Warning(f'Advanced settings file {file} not found!')
+                self._settings.update(self.extra_patch)
+        else:
+            Warning('Advanced settings already provided, skipping loading from files.')
 
     @property
     def settings(self):
-        # if not self._settings:
-        #     for file in self.advanced_paths:
-        #         self._settings.update(_load_json_or_yaml(file))
-        #     self._settings.update(self.extra_patch)
         return self._settings
     
     @classmethod
     def from_file(cls,file:PathT):
-        return cls(advanced_paths=[str(file)])
-    
+        ret=cls(advanced_paths=[str(file)])
+        return ret
+
 @dataclass
 class FilterSettings(BaseSettings): 
     filters_path:Optional[str]=None
@@ -192,7 +196,7 @@ class FilterSettings(BaseSettings):
         return cls(filters_path=str(file))
     
     def __post_init__(self):
-        if self.filters_path is not None:
+        if self.filters_path is not None and self.filters_path.lower() != 'none':
             self.filters_path=str(self.filters_path)
             load_json=_load_json_or_yaml(self.filters_path)
             thresholds:dict=load_json.get('thresholds',{})

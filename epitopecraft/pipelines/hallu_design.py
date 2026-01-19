@@ -1,5 +1,5 @@
 
-from ..steps import (Hallucinate,Filter,Refold,Graft,AnnotRMSD,
+from ..steps import (Hallucinate,Filter,Refold,Graft,AnnotRMSD,AnnotGyration,
     AnnotSurf,MPNN,AnnotPolarOccupy,AnnotPTM,AnnotBCAux,AnnotPI,Relax)
 
 from ..utils import (
@@ -62,22 +62,25 @@ class HalluDesign(BasePipeline):
         settings=self.settings
         self.hallu=Hallucinate(settings)
         self.filter=Filter(settings)
-        if self.settings.adv.get('templated',False):
+        if self.settings.adv.setdefault('templated',False):
             self.graft=Graft(settings)
         self.refold=Refold(settings)       
         self.mpnn=MPNN(settings)
         self.annot_rmsd=AnnotRMSD(settings) 
         self.annot_surf=AnnotSurf(settings)
         self.annot_polar=AnnotPolarOccupy(settings)
+        self.annot_gyr=AnnotGyration(settings)
         self.relax=Relax(self.settings)
-
-        self.annot_ogly=AnnotPTM(self.settings)
-        self.annot_ogly.config_params(ptm_type='O-linked_glycosylation')
-        self.annot_ngly=AnnotPTM(self.settings)
-        self.annot_ngly.config_params(ptm_type='N-linked_glycosylation')
-
         self.annot_aux=AnnotBCAux(self.settings)
-        self.annot_pi=AnnotPI(self.settings)        
+        self.annot_pi=AnnotPI(self.settings)
+
+        if self.settings.adv.setdefault('templated',False):
+            self.graft=Graft(settings)
+        if self.settings.adv.setdefault('annot_ptm',False):
+            self.annot_ogly=AnnotPTM(self.settings)
+            self.annot_ogly.config_params(ptm_type='O-linked_glycosylation')
+            self.annot_ngly=AnnotPTM(self.settings)
+            self.annot_ngly.config_params(ptm_type='N-linked_glycosylation')
         self._config_steps()
         self._save_settings()
 
@@ -143,16 +146,16 @@ class HalluDesign(BasePipeline):
         
         batch=_graft_refold(batch)
 
-        # 
         def _score_after_refold(batch):
             self.annot_rmsd.process_batch(batch)
+            self.annot_gyr.process_batch(batch)
             batch=self.filter.set_recipe("after:refold").process_batch(batch)
             self.annot_surf.process_batch(batch)
             self.relax.process_batch(batch)
             self.annot_polar.process_batch(batch)
-            # if ...
-            self.annot_ogly.process_batch(batch)
-            self.annot_ngly.process_batch(batch)
+            if self.settings.adv.setdefault('annot_ptm',False):
+                self.annot_ogly.process_batch(batch)
+                self.annot_ngly.process_batch(batch)
             return batch
         
         batch=_score_after_refold(batch)
@@ -163,6 +166,7 @@ class HalluDesign(BasePipeline):
         def _final_scores(batch):
             self.annot_aux.process_batch(batch)
             self.annot_pi.process_batch(batch)
+            batch=self.filter.set_recipe("final").process_batch(batch)
             return batch
         
         batch=_final_scores(batch)
@@ -180,10 +184,11 @@ class HalluDesign(BasePipeline):
         graft_stem:str='graft',
         overwrite:bool=False,
         overwrite_refold_only:bool=False,
+        annot_ptm: bool=False
         `overwrite`: rewrite everything;
         `overwrite_refold_only`: only rerun graft-refold
         `templated`: refold w/wo hallucination templates 
         '''
         return tuple([
-            'metrics_stem','hallu_stem','refold_stem',
+            'metrics_stem','hallu_stem','refold_stem','annot_ptm',
             'graft_stem','overwrite','overwrite_refold_only'])

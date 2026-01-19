@@ -20,7 +20,7 @@ Optional:
   for extra stability metrics
 
 ## Quick start
-`python epitopecraft/main.py --target-settings TARGET_SETTING --binder-settings BINER_SETTINGS --advanced-settings ADV_SETTINGS --filter-settings FILTER_SETTING` 
+`python -m epitopecraft.main standard-design --target-settings TARGET_SETTING --binder-settings BINER_SETTINGS --advanced-settings ADV_SETTINGS --filter-settings FILTER_SETTING` 
 
 The `epitopecraft/main.py` entry point launches the `HalluDesign` pipeline, which wires
 `Hallucinate → Filter → (optional) Graft → Refold → Annotate/Relax → MPNN → final scoring`.

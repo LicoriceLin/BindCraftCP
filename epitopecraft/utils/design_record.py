@@ -5,7 +5,7 @@ from dataclasses import dataclass,field
 import os,json
 import pandas as pd
 from pathlib import Path
-from .utils import NEST_SEP, _iterate_get, _iterate_set,_iterate_in,_iterate_get_safe
+from .utils import NEST_SEP, _iterate_get, _iterate_set,_iterate_in,_iterate_get_safe,flatten_dict
 from logging import warning
 PathT=os.PathLike[str]|None
 
@@ -183,6 +183,11 @@ class DesignBatch:
         for metric in metrics:
             ret[metric]={k:v.get_metrics(metric) for k,v in self.records.items()}
         return ret
+    
+    def pass_df(self):
+        d_={k:flatten_dict(v) for k,v in self.df(['filter'])['filter'].to_dict().items()}
+        pass_df=pd.DataFrame(d_).T
+        return pass_df
     
     def to_fasta(self,outfile:str|None=None)->str|None:
         '''
