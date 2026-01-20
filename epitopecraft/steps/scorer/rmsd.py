@@ -36,12 +36,23 @@ class AnnotRMSD(BaseScorer):
 
     def _init_params(self):
         ts=self.settings.target_settings
+
+        ################# fix
+        target_key = self.pdb_to_take.get("target", "")
+        if "template" in target_key:
+            target_sel = f"chain {ts.full_target_chain}"
+            target_rms_sel = f"chain {ts.new_binder_chain}"
+        else:
+            target_sel = "chain A"
+            target_rms_sel = f"chain {ts.full_binder_chain}"  # usually B ?
+        ################# fix
+
         self.params=dict(
             pdb_to_take=self.pdb_to_take,
             mobile_sel='chain A',
             mobile_rms_sel=f'chain {ts.full_binder_chain}' , 
-            target_sel=f'chain {ts.full_target_chain}',
-            target_rms_sel=f'chain {ts.new_binder_chain}',
+            target_sel= target_sel, # f'chain {ts.full_target_chain}',
+            target_rms_sel= target_rms_sel, # f'chain {ts.new_binder_chain}',
             metrics_prefix=self.metrics_prefix
             )
 

@@ -179,6 +179,16 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.align(f'{mobile} and ({mobile_sel})',mobile_sel)
     cmd.delete(f'{mobile}-aln')
     cmd.delete(f'{target}-aln')
+
+    ############# debug
+    print("objects:", cmd.get_names("objects"))
+    print("mobile sel:", f"{mobile} and ({mobile_rms_sel})")
+    print("target sel:", f"{target} and ({target_rms_sel})")
+    print("mobile atoms:", cmd.count_atoms(f"{mobile} and ({mobile_rms_sel})"))
+    print("target atoms:", cmd.count_atoms(f"{target} and ({target_rms_sel})"))
+    breakpoint()
+    ############# debug
+
     ret2=cmd.align(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' ,cycles=0,transform=0)[0]
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
 

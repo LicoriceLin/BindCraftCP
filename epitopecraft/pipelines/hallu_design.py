@@ -35,7 +35,7 @@ def init_hallu_settings(
         if isinstance(patch,str):
             patch=json.load(open(patch,'r'))
     if filters is None:
-        filters = _dir_path/'config/default_filter.json'
+        filters = _dir_path/'config/default_filter.yaml'
     
     settings=GlobalSettings(
         target_settings=TargetSettings.from_json(target_settings),

@@ -20,7 +20,7 @@ from typing import Tuple
     )
 @click.option(
     '--filter-settings','-f',
-    default='epitopecraft/pipelines/config/default_filter.json',
+    default='epitopecraft/pipelines/config/default_filter.yaml',
     help='yaml/json files to define filter thresholds and steps when they are applied.'
     )
 def standard_design(

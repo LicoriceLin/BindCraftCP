@@ -1,4 +1,4 @@
-filters_path: epitopecraft/pipelines/config/default_filter.json
+filters_path: epitopecraft/pipelines/config/default_filter.yaml
 thresholds:
   halu:
     pLDDT:

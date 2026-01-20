@@ -1,9 +1,9 @@
 {
     "design_path": "output/test",
-    "binder_name": "tseg6",
+    "binder_name": "WDR5",
     "binder_lengths": [
         12,
-        16
+        17
     ],
     "random_seeds": [
         0,
