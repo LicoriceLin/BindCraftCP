@@ -1,5 +1,5 @@
 cyclize_peptide: false # whether to design cyclic peptide (instead of mini-protein)
-templated: false # whether to provide hallucinated conformation as template during refold validation. Recommended for Epitope-only Design.
+templated: true # whether to provide hallucinated conformation as template during refold validation. Recommended for Epitope-only Design.
 
 # Control Hallucination
 omit_AAs: '' # which amino acids to exclude from design (note: they can still occur if no other options are possible in the position)

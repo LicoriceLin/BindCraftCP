@@ -173,6 +173,7 @@ class Hallucinate(BaseStep):
     def process_record(self,input:DesignRecord)->DesignRecord:
         with self.record_time(input):
             m=input.metrics
+            # breakpoint()
             self.config_afdesign_model(
                 length=m['config']['length'],seed=m['config']['seed'],helicity_value=m['config']['helix'])
             record=self.sample_trajectory(input)
@@ -210,6 +211,7 @@ class Hallucinate(BaseStep):
                     if batch.overwrite or design_id not in batch.records:
                         record=DesignRecord(id=design_id,sequence='')
                         record.update_metrics({"config:helix":helicity_value,'config:length':length,'config:seed':seed})
+                        breakpoint() # break_m1
                         batch.add_record(self.process_record(record))
                         self.purge_record(record)
                         batch.save_record(design_id)

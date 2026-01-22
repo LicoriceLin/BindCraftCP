@@ -121,6 +121,7 @@ class BaseStep(ABC):
             self.config_pdb_input_key(pdb_to_take)
         for records_id,record in tqdm(input.records.items(), desc=self.name):
             if input.overwrite or not self.check_processed(record):
+                breakpoint() # break4
                 self.process_record(record)
                 self.purge_record(record)
                 input.save_record(records_id)

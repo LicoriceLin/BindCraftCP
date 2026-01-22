@@ -1,5 +1,5 @@
 {
-    "design_path": "output/test",
+    "design_path": "output/test_wdr5_learn",
     "binder_name": "WDR5",
     "binder_lengths": [
         12,

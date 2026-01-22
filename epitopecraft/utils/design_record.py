@@ -109,6 +109,7 @@ class DesignBatch:
 
     def load_records(self,cache_dir:Optional[PathT]=None):
         cache_dir=self._fetch_cache_dir(cache_dir)
+        breakpoint() # break5
         for i in self.cache_dir.iterdir():
             if i.suffix=='.json':
                 # under overwrite mode, assume cache data should be discarded, 
