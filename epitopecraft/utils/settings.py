@@ -124,14 +124,18 @@ class TargetSettings(BaseSettings):
                       Introduced to handle the situation where 'B' is in full_target_chain. 
                       No need to be initialized. 
     '''
-    starting_pdb:str
-    chains:str
+    starting_pdb:Optional[str]=None # for boltzgen design, only full_target_pdb/full_target_chain is needed
+    chains:Optional[str]=None
     target_hotspot_residues:Optional[str]=None
     full_target_pdb:Optional[str]=None
     full_target_chain:Optional[str]=None
     full_binder_chain:str=field(repr=False,init=False,default='B')
     new_binder_chain:str=field(repr=False,init=False,default='')
     def __post_init__(self):
+        if self.starting_pdb is None and self. full_target_pdb is None:
+            raise ValueError('`starting_pdb` essential for ColabDesign and `full_target_pdb` essential for BoltzGen')
+        # if self.starting_pdb is None:
+        #     self.starting_pdb=self.full_target_pdb
         if self.full_target_chain is not None:
             if self.full_binder_chain in self.full_target_chain:
                 for i in ascii_uppercase:

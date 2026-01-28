@@ -41,7 +41,7 @@ class Refold(BaseStep):
             f'{self.name}-prefix',f'{self.name}-pdb-input',
             'use_multimer_design','num_recycles_validation',
             'rm_template_seq_predict','rm_template_sc_predict',
-            'rm_template_ic_predict','cyclize_peptide',
+            'rm_template_ic_predict','cyclize_peptide','templated'
         ]
         return tuple(ret)
     
@@ -51,13 +51,6 @@ class Refold(BaseStep):
             return 'halu'
         else:
             return 'templated'
-        
-    # def config_pdb_input_key(self, pdb_to_take = None):
-    #     if pdb_to_take is None:
-    #         default='template' if self.templated else 'halu'
-    #         self._pdb_to_take=self.settings.adv.setdefault('template-pdb-key',default)
-    #     else:
-    #         self._pdb_to_take=pdb_to_take
     
     def config_complex_model(self,record:DesignRecord):
         '''
