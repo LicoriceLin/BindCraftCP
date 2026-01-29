@@ -1,9 +1,8 @@
 {
-    "design_path": "output/test_wdr5_learn2",
-    "binder_name": "WDR5",
+    "design_path": "output/refold_val",
+    "binder_name": "",
     "binder_lengths": [
-        12,
-        17
+        0
     ],
     "random_seeds": [
         0

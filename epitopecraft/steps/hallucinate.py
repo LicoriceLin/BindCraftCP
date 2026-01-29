@@ -211,7 +211,7 @@ class Hallucinate(BaseStep):
                     if batch.overwrite or design_id not in batch.records:
                         record=DesignRecord(id=design_id,sequence='')
                         record.update_metrics({"config:helix":helicity_value,'config:length':length,'config:seed':seed})
-                        breakpoint() # break_m1
+                        # breakpoint() # break_m1
                         batch.add_record(self.process_record(record))
                         self.purge_record(record)
                         batch.save_record(design_id)

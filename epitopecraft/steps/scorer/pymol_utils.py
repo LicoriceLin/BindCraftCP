@@ -176,7 +176,7 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.create(f'{mobile}-aln',f'{mobile} and ({mobile_sel})')
     cmd.create(f'{target}-aln',f'{target} and ({target_sel})')
     ret1=cmd.align(f'{mobile}-aln',f'{target}-aln')
-    cmd.align(f'{mobile} and ({mobile_sel})',mobile_sel)
+    cmd.align(f'{mobile} and ({mobile_sel})', f'{mobile}-aln') ## f'{mobile} and ({mobile_sel})',mobile_sel
     cmd.delete(f'{mobile}-aln')
     cmd.delete(f'{target}-aln')
 

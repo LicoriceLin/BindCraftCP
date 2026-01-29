@@ -1,0 +1,61 @@
+filters_path: epitopecraft/pipelines/config/default_filter.yaml
+thresholds:
+  halu:
+    pLDDT:
+      threshold: 0.8
+      higher: true
+    i-pAE:
+      threshold: 0.35
+      higher: false
+  refold:
+    multimer-1:
+      pLDDT:
+        threshold: 0.8
+        higher: true
+      i-pAE:
+        threshold: 0.35
+        higher: false
+    multimer-2:
+      pLDDT:
+        threshold: 0.8
+        higher: true
+      i-pAE:
+        threshold: 0.35
+        higher: false
+    best:
+      binder_rmsd:
+        threshold: 3.5
+        higher: false
+  rst:
+    binder_score:
+      threshold: 0
+      higher: false
+    dG:
+      threshold: 0
+      higher: false
+    dSASA:
+      threshold: 1
+      higher: true
+    shape_complementarity:
+      threshold: 0.6
+      higher: true
+    hbond:
+      threshold: 3
+      higher: true
+    unsat_hbond:
+      threshold: 4
+      higher: false
+  aux:
+    surf_hydro:
+      threshold: 0.65
+      higher: false
+    kappa2:
+      threshold: 0.4
+      higher: false
+  pi-fold:
+    threshold: 4.5
+    higher: true
+recipes:
+  after:hallucinate: [halu]
+  after:refold: [refold,aux:kappa2]
+  final: [rst, aux:surf_hydro, pi-fold]

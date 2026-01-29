@@ -128,16 +128,17 @@ class HalluDesign(BasePipeline):
             )
 
     def run(self):
-        breakpoint() # break2
+        # breakpoint() # break2
         adv=self.settings.adv
         tgt=self._internal_target_setting
         # hallucination
         batch=self.hallu.process_batch(
             batch_cache_stem=adv.setdefault('metrics_stem','metrics'),
             overwrite=adv.get('overwrite',False))
-        breakpoint() # break3
+        # breakpoint() # break3
         batch.parent.set_overwrite(adv.setdefault('overwrite_refold_only',False))
         batch=self.filter.set_recipe("after:hallucinate").process_batch(batch)
+        breakpoint() # break_m2
 
         # graft/refold
         def _graft_refold(batch):

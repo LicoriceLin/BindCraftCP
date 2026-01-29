@@ -1,0 +1,64 @@
+cyclize_peptide: false # whether to design cyclic peptide (instead of mini-protein)
+templated: true # whether to provide hallucinated conformation as template during refold validation. Recommended for Epitope-only Design.
+
+# Control Hallucination
+omit_AAs: '' # which amino acids to exclude from design (note: they can still occur if no other options are possible in the position)
+use_multimer_design: true # whether to use AF2-ptm or AF2-multimer for binder design; the other model will be used for validation then
+sample_models: true # whether to randomly sample parameters from AF2 models, recommended to avoid overfitting
+rm_template_seq_design: false # remove target template sequence for design (increases target flexibility)
+rm_template_seq_predict: false # remove target template sequence for reprediction (increases target flexibility)
+rm_template_sc_design: false # remove sidechains from target template for design
+rm_template_sc_predict: false # remove sidechains from target template for reprediction
+rm_template_ic_predict: true # removing interchain contacts from refold template
+
+soft_iterations: 75 # number of soft iterations (all amino acids considered at all positions)
+temporary_iterations: 45 # number of temporary iterations (softmax, most probable amino acids considered at all positions)
+hard_iterations: 5 # number of hard iterations (one hot encoding, single amino acids considered at all positions)
+
+# Control 4-stage Evolution
+greedy_iterations: 15 # number of iterations to sample random mutations from PSSM that reduce loss
+greedy_percentage: 1 # what percentage of protein length to mutate during each greedy iteration
+4stage-mcmc: false # whether to use MCMC (instead of semi-greedy optimization) optmization at stage 4
+4stage-use-pssm: false # whether to use hallucinated pssm matrix as mutation guidance at stage 4
+4stage_keep_best: true # whether to keep the best frame (instead of the last) at stage 4
+mcmc_half_life_ratio: 0.2 # annealing parameter for MCMC evolution
+
+# Control Hallucination Loss
+weights_plddt: 0.1 # Design weight - pLDDT of designed chain
+weights_pae_intra: 0.4 # Design weight - PAE within designed chain
+weights_pae_inter: 0.1 # Design weight - PAE between chains
+weights_con_intra: 1.0 # Design weight - maximize number of contacts within designed chain
+weights_con_inter: 1.0 # Design weight - maximize number of contacts between chains
+intra_contact_distance: 14.0 # Cbeta-Cbeta cutoff distance for contacts within the binder
+inter_contact_distance: 20.0 # Cbeta-Cbeta cutoff distance for contacts between binder and target
+intra_contact_number: 2 # how many contacts each contact esidue should make within a chain, excluding immediate neighbours
+inter_contact_number: 2 # how many contacts each contact residue should make between chains
+use_i_ptm_loss: true # Use i_ptm loss to optimise for interface pTM score?
+weights_iptm: 0.05 # Design weight - i_ptm between chains
+use_rg_loss: true # use radius of gyration loss?
+weights_rg: 0.3 # Design weight - radius of gyration weight for binder
+
+# Refold Helper
+predict_initial_guess: false # providing hallucinated conformation as starting point for refold validation. 
+predict_initial_atom_pos: false # providing hallucinated conformation as initilization coords for refold validation.
+
+# Control MPNN Redesign
+mpnn_bias_recipe: epitopecraft/pipelines/config/mpnn-default-recipe.json # path to recipe controlling MPNN bias
+n_mpnn_samples: 20 # how many MPNN redesign for each backbone
+max_mpnn_sequences: 2 # how many maximum MPNN sequences per trajectory to save if several pass filters
+mpnn_sampling_temp: 0.1 # temperature for MPNN sampling. higher temperature yields higher diversity and perplexity
+mpnn_backbone_noise: 0.0 # backbone noise added to backbone coordinates during MPNN redesign
+mpnn_weights: soluble # whether to use "original" mpnn weights or "soluble" weights
+save_mpnn_fasta: false # whether to save MPNN sequences as fasta files, normally not needed as the sequence is also in the CSV file
+num_recycles_design: 1 # how many recycles of AF2 for design
+num_recycles_validation: 3 # how many recycles of AF2 use for structure prediction and validation
+
+# Path to model parameter & binary file
+af_params_dir: params/
+mpnn_model_path: v_48_020
+dssp_path: epitopecraft/steps/dssp
+dalphaball_path: epitopecraft/steps/DAlphaBall.gcc
+
+# Debug 
+verb: 0
+hallu_save_loss: false
