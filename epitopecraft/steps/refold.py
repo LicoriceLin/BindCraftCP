@@ -1,5 +1,6 @@
 from .basestep import *
 from colabdesign import mk_afdesign_model
+from epitopecraft.steps.scorer.pymol_utils import partial_align_noobj
 from pymol import cmd
 import tempfile
 from string import ascii_uppercase
@@ -310,6 +311,8 @@ def _graft_binder(ori_pdb:str,ori_binder_chain:str,
     '''
     cmd.load(ori_pdb,'ori_pdb')
     cmd.load(graft_target,'graft_pdb')
+    partial_align_noobj(mobile='ori_pdb',mobile_sel=f'not (chain {ori_binder_chain})',
+        target='graft_pdb',target_sel=f'(graft_pdb and (chain {graft_chain}))')
     if new_binder_chain != ori_binder_chain:
         cmd.alter(f'ori_pdb and chain {ori_binder_chain}',f'chain="{new_binder_chain}"')
     cmd.create('to_write',f" (ori_pdb and (chain {new_binder_chain})) or (graft_pdb and (chain {graft_chain}))")

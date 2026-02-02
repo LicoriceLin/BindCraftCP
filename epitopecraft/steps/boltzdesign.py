@@ -4,6 +4,7 @@ from pymol import cmd
 import yaml
 from subprocess import run
 from warnings import warn
+from glob import glob
 class BolzGenSampler(BaseStep):
     def __init__(self,
         settings:GlobalSettings,
@@ -15,6 +16,12 @@ class BolzGenSampler(BaseStep):
         3. num_designs=len(bs.binder_lengths) * len(bs.helix_values) * len(bs.global_seed)
         '''
         super().__init__(settings)
+        self._used_columns=(
+            'design_ptm','filter_rmsd','interaction_pae','iptm','ptm',
+            'plip_hbonds_refolded','delta_sasa_refolded','design_chain_hydrophobicity',
+            'loop','helix','sheet',
+            'liability_score','liability_violations_summary',
+            )
 
     def _gen_sub(self):
         adv=self.settings.adv
@@ -103,9 +110,13 @@ class BolzGenSampler(BaseStep):
         for i in objects:
             cmd.delete(i)
 
-    def _run(self):
+    def _run(self,overwrite:bool=False):
+        '''
+        Note: overwrite is internally controlled by 
+        '''
         adv=self.settings.adv
         bs=self.settings.binder_settings
+        boltzdesign_stem=adv.setdefault('boltzdesign_stem','boltzdesign')
         env=adv.setdefault('boltzgen_env','boltzgen')
         if '/' in env:
             flag='-p'
@@ -117,17 +128,58 @@ class BolzGenSampler(BaseStep):
             protocol_='peptide-anything'
         num_designs=len(bs.binder_lengths) * len(bs.helix_values) * len(bs.random_seeds)
         yaml_recipe=f'{self.design_path}/{self.design_name}-boltz.yaml'
-        
-        run(['conda','run',flag,env, 
+        cmds=['conda','run',flag,env, 
             'boltzgen','run',yaml_recipe, 
-            '--output',bs.design_path+'/boltzdesign',
-            '--protocol',protocol_, '--num_designs', str(num_designs), '--budget', str(num_designs), '--reuse'])
-        self.settings.target_settings.starting_pdb=f'{bs.design_path}/boltzdesign/{bs.binder_name}-boltz.cif'
+            '--output',bs.design_path+f'/{boltzdesign_stem}',
+            '--protocol',protocol_, '--num_designs', str(num_designs), '--budget', str(num_designs)]
+        if not overwrite:
+            cmds.append('--reuse')
+        run(cmds)
+        self.settings.target_settings.starting_pdb=f'{bs.design_path}/{boltzdesign_stem}/{bs.binder_name}-boltz.cif'
 
-    def collect_results(self):
+    def _collect_results(self,batch:DesignBatch,overwrite:bool=False):
         assert self.metrics is not None
-        
+        bs=self.settings.binder_settings
+        adv=self.settings.adv
+        boltzdesign_stem=adv.setdefault('boltzdesign_stem','boltzdesign')
+        for i,s in self.metrics.iterrows():
+            if s['id'] not in batch.records or overwrite:
+                design_pdb_=glob(f'{bs.design_path}/{boltzdesign_stem}/final_ranked_designs/final_*_designs/*{s["id"]}.cif')
+                if len(design_pdb_)>0:
+                    design_pdb=design_pdb_[0]
+                    record=DesignRecord(id=s['id'],sequence=s['designed_chain_sequence'])
+                    record.pdb_files[f'{self.metrics_prefix}design']=design_pdb
+                    for _c in self._used_columns:
+                        record.set_metrics(f'{self.metrics_prefix}{_c}',s[_c])
+                    #TODO read per-res pLDDT from cif.
+                    batch.add_record(record)
+                    batch.save_record(s['id'])
+        return batch
+    
+    def process_batch(self,overwrite:bool=False,metrics_prefix:str|None=None,
+        pdb_purge_stem=None,pdb_to_take=None, # no use
+        ):
+        bs=self.settings.binder_settings
+        metrics_stem:str=self.settings.adv.setdefault('metrics_stem','metrics')
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
 
+        metrics_dir=Path(bs.design_path)/metrics_stem
+        if not overwrite and metrics_dir.exists():
+            batch=DesignBatch.from_cache(metrics_dir).filter(lambda x:bs.binder_name in x.id)
+        else:
+            batch=DesignBatch(Path(bs.design_path)/metrics_stem)
+
+        yaml_recipe=Path(f'{self.design_path}/{self.design_name}-boltz.yaml')
+        if not yaml_recipe.exists() or overwrite:
+            self._gen_sub()
+
+        if self.metrics is None:
+            self._run(overwrite)
+        
+        batch=self._collect_results(batch,overwrite)
+        return batch
+        
     @property
     def params_to_take(self)->Tuple[str,...]:
         '''
@@ -149,16 +201,37 @@ class BolzGenSampler(BaseStep):
         return self.settings.binder_settings.design_path
 
     @property
+    def pdb_to_add(self):
+        return tuple([f'{self.metrics_prefix}:design'])
+    
+    @property
     def design_name(self):
         return self.settings.binder_settings.binder_name
-
+    
+    @property
+    def metrics_to_add(self):
+        """
+        BioPhysical Annotations: plip_hbonds_refolded,delta_sasa_refolded, design_chain_hydrophobicity
+        SS-Struct Annotations: loop, helix, sheet
+        Liability score components assessing sequence-level developability risks:
+            - ProtTryp: Proteolytic trypsin cleavage liability; indicates susceptibility to trypsin-mediated proteolysis at Lys/Arg sites, potentially reducing in vivo and in vitro stability.
+            - DPP4: Dipeptidyl peptidase-4 cleavage liability; reflects risk of N-terminal dipeptide truncation by DPP4, often leading to rapid degradation and shortened half-life of peptides.
+            - MetOx: Methionine oxidation liability; captures the propensity for oxidative modification of methionine residues, which can impair stability, activity, and batch consistency.
+            - TrpOxNTCycl: Tryptophan oxidation and N-terminal cyclization liability; represents risks of Trp oxidation and N-terminal cyclization (e.g., pyroglutamate formation), contributing to chemical heterogeneity.
+            - AspCleave: Aspartate-mediated backbone cleavage liability; indicates susceptibility to non-enzymatic peptide bond cleavage near Asp residues under stress or storage conditions.
+            - AspBridge: Aspartate isomerization/bridging liability; reflects risk of Asp/isoAsp formation or abnormal intramolecular rearrangements, potentially altering backbone geometry and bioactivity.
+            - HydroPatch: Hydrophobic surface patch liability; measures exposed hydrophobic clustering that can promote aggregation, poor solubility, and reduced manufacturability.
+        """
+        return tuple([f'{self.metrics_prefix}{i}' for i in self._used_columns])
+        
     @property
     def metrics(self):
         '''
         trick: del `self._metrics` to reload.
         '''
         if getattr(self,'_metrics', None) is None:
-            metrics_path=f'{self.design_path}/boltzdesign/final_ranked_designs/all_designs_metrics.csv'
+            boltzdesign_stem=self.settings.adv.setdefault('boltzdesign_stem','boltzdesign')
+            metrics_path=f'{self.design_path}/{boltzdesign_stem}/final_ranked_designs/all_designs_metrics.csv'
             if Path(metrics_path).exists():
                 self._metrics=pd.read_csv(metrics_path)
             else:
@@ -166,8 +239,14 @@ class BolzGenSampler(BaseStep):
                 self._metrics = None
         return self._metrics
 
+    @property
+    def _default_metrics_prefix(self):
+        return f'boltzgen{NEST_SEP}'
+    
+    @property
+    def params_to_take(self):
+        ret=[f'{self.name}-prefix','boltzdesign_stem','metrics_stem','boltzgen_env',
+             'epitope_range','epitope_strategy','cyclize_peptide',]
+        return tuple(ret)
             
-        
-
-
         
