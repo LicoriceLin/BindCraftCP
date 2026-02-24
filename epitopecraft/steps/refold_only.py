@@ -3,6 +3,8 @@ Adapted from: epitopecraft/steps/refold.py
 - monomer refold
 * template usage (chain info)
 * template usage (pdb_filename): no template mode also use complex template pdb
+* changed batch design iteration order
+* options to not save the refolded PDBs
 '''
 
 from .basestep import *
@@ -14,6 +16,7 @@ from tqdm import tqdm
 class RefoldOnly(BaseStep):
     def __init__(self,settings:GlobalSettings):
         self.templated=settings.adv.setdefault('templated',False)
+        #self.keep_refold=settings.adv.setdefault('keep_refold', True)
         super().__init__(settings)
         
     
@@ -87,6 +90,7 @@ class RefoldOnly(BaseStep):
             ##         'not found in `record.pdb_files`')
             
             if getattr(self,'current_template_pdb','')!=template_pdb:
+                print(f"Initializing template: {record.id}") ###
                 self.current_template_pdb=template_pdb
                 ## if 'template' in self.pdb_to_take: #self.settings.adv.get('templated',False):
                 ##     chain,binder_chain=s.target_settings.full_target_chain,s.target_settings.new_binder_chain
@@ -238,8 +242,9 @@ class RefoldOnly(BaseStep):
             self.config_metrics_prefix(metrics_prefix)
         if pdb_to_take is not None:
             self.config_pdb_input_key(pdb_to_take)
-        for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}'):
-            record=input.records[design_id]
+        ## for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}'):
+        ##     record=input.records[design_id]
+        for design_id, record in tqdm(input.records.items(),desc=f'{self.name}'):
             if not self.check_processed(record):
                 self.process_record(record)
                 self.purge_record(record)

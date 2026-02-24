@@ -1,4 +1,5 @@
 import click
+import shutil
 from epitopecraft.pipelines.refold_val import RefoldValidation
 from epitopecraft.utils import (
     TargetSettings,GlobalSettings,AdvancedSettings,
@@ -19,8 +20,8 @@ from tqdm.auto import tqdm
 target_settings = 'config/refold_val_configs/test_target_setting.json'
 binder_settings = 'config/refold_val_configs/test_binder_setting.json'
 filter_settings = 'config/refold_val_configs/default_filter.yaml'
-advanced_settings = ['config/refold_val_configs/base_advanced_settings.yaml']
-
+advanced_settings = ['config/refold_val_configs/base_advanced_settings.yaml',
+                     'config/patch_templated.json'] # NOTE: something's not working properly here
 
 ################################################################## helper funcs
 
@@ -105,15 +106,17 @@ def _saveParams(out_dir, name="run_params", **kwargs):
 
 ################################################################## main runner
 
+# NOTE: for future users, please also change template-root, out-root
 @click.command()
 @click.option("--run-name", default='test', type=str)
 @click.option("--dataset", required=True, type=str, help="csv file contain all info for one target")
-@click.option("--target", required=True, type=str, help="target name for all the designed binders")
+@click.option("--target", required=True, type=str, help="target name for all the designed binders; separate u/l cases")
 @click.option("--cutoff", default="full", type=str, help="target cutoff ranges (top x); e.g. 'full,30,50'")
-@click.option("--cutoff-map", default="___", type=str, help=".json file that stored residue indices for different cutoff range")
-@click.option("--template-root", default="___", type=str, help="root folder for all template" )
+@click.option("--cutoff-map", required=True, type=str, help=".json file that stored residue indices for different cutoff range")
+@click.option("--template-root", default="/hpf/projects/mtyers/ningrui/BindCraftCP/data/prosp_templates", type=str, help="root folder for all template" )
 @click.option("--out-root", default='/hpf/projects/mtyers/ningrui/BindCraftCP/output/refold_val', type=str, help="root folder for output")
-@click.option("--templated/--no-templated", default=True, help="whether to use binder template for refolding; slightly different from original usage") #NOTE: NOT finished changing
+@click.option("--templated/--no-templated", default=True, help="whether to use binder template for refolding; slightly different from original BC usage") #TODO: NOT finished changing
+@click.option("--keep-refold", is_flag=True, default=False, help="whether to keep all the refolded structures (space consuming)")
 def main(
     run_name,
     dataset,
@@ -122,10 +125,10 @@ def main(
     cutoff_map,
     template_root,
     out_root,
-    templated: bool
+    templated: bool,
+    keep_refold: bool
 ) -> DesignBatch:
     
-    print("yay you survived here!")
 
     df = pd.read_csv(dataset)
     cutoff_list = _parseCutoffs(cutoff)
@@ -151,6 +154,12 @@ def main(
     settings = _loadSettings(target_settings, binder_settings, filter_settings, advanced_settings)
     settings.adv["templated"] = templated
     settings.adv["refold_stem"] = "refold"
+    settings.adv["keep_refold"] = keep_refold
+
+    # customize
+    settings.adv["predict_initial_atom_pos"] = False
+    settings.adv['use_multimer_design'] = False
+
     settings.binder_settings.design_path = str(run_dir)
     ## NOTE: patch & adapt chain info for RMSD
     settings.target_settings.full_target_chain = "B"
@@ -167,15 +176,20 @@ def main(
     rows_meta = []
     
     #breakpoint()
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="rows"):
-        binder = row["description"]
-        binder_seq = row["binder_seq"]
-        template_full = Path(row["design_complex_pdb"]) # NOTE: should be inside template_store
+    for cutoff in cutoff_list: # NOTE: cutoff = top k
+        cutoff_label = "full" if cutoff is None else f"top_{cutoff}"
 
-        # NOTE: cutoff = top k
-        for cutoff in cutoff_list: 
-            cutoff_label = "full" if cutoff is None else f"top_{cutoff}"
-            record_id = f"{binder}_{cutoff_label}"
+        # NOTE: same template should be grouped together in df
+        for _, row in tqdm(df.iterrows(), total=len(df), desc="rows"): 
+            is_binder = row["is_binder"]
+            binder = row["description"]
+            binder_seq = row["trimmed"] # row["sequence"] NOTE: tested binder sequences have an extra S added.
+            template_name = row["init_name"]
+
+            template_full = Path(template_store / f"{template_name}.pdb") # NOTE: should be inside template_store
+            binding_info = "B" if is_binder else "NB"
+            
+            record_id = f"{binding_info}_{binder}_{cutoff_label}"
 
             if cutoff is None:
                 template_pdb = str(template_full)
@@ -203,7 +217,7 @@ def main(
                               "template_full": template_full,
                               "template_cut": template_pdb})
             
-    batch = refolding.run(batch)
+    batch = refolding.run(batch) 
 
     rows_metrics = []
     for rec_id, design_rec in batch.records.items():
@@ -218,10 +232,13 @@ def main(
     out_path = run_dir / "refold_summary.csv"
     out.to_csv(out_path, index=False)
     print(f"All refolding down, final data summary write to: {out_path}")
-        
+    
+    if not keep_refold:
+        if refold_dir.exists() and refold_dir.is_dir():
+            shutil.rmtree(refold_dir)
+            print(f"Removed refolded PDBs to save space")
 
 if __name__ == "__main__":
     main()
 
 # NOTE: need normalize metrics?
-# TODO: remove monomer

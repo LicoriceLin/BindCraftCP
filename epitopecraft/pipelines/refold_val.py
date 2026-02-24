@@ -55,7 +55,7 @@ class RefoldValidation(BasePipeline):
     def run(self, batch: DesignBatch) -> DesignBatch:
 
         self.refold.process_batch(batch)
-        breakpoint()
+        #breakpoint()
         self.annot_rmsd.process_batch(batch)
 
         return batch
