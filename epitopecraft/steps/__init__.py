@@ -5,4 +5,4 @@ from .mpnn import MPNN
 from .scorer import *
 from .relax import Relax
 from .basestep import BaseStep
-from .pseudo_hotspot import PseudoHotspot
+from .pseudo_hotspot import AnnotHotspot, PseudoHotspot

@@ -16,7 +16,8 @@ from scipy.spatial.distance import pdist, squareform
 from tqdm import tqdm
 
 from .basestep import BaseStep, DesignBatch, DesignRecord, GlobalSettings
-from .scorer.pymol_utils import hotspots_by_ligand, map_residues_between_pdbs,ResidueKey
+from .scorer.pymol_utils import ResidueKey, hotspots_by_ligand, map_residues_between_pdbs
+from ..utils import NEST_SEP
 from ..utils.preprocess import hotspots_topk_motifs
 from warnings import warn
 
@@ -544,3 +545,82 @@ class PseudoHotspot(BaseStep):
         if resi.isdigit():
             return chain, int(resi), ""
         return chain, resi, ""
+
+
+class AnnotHotspot(BaseStep):
+    def __init__(self, settings: GlobalSettings):
+        super().__init__(settings)
+
+    @property
+    def name(self) -> str:
+        return "pseudo-hotspot"
+
+    @property
+    def _default_pdb_input_key(self) -> dict[str, str]:
+        ts = self.settings.target_settings
+        return {
+            "pdb_key": "template",
+            "binder_chain": ts.new_binder_chain,
+            "target_chain": ts.full_target_chain,
+        }
+
+    def config_pdb_input_key(
+        self,
+        pdb_key: str | None = None,
+        binder_chain: str | None = None,
+        target_chain: str | None = None,
+        pdb_to_take: dict[str, str] | None = None,
+    ):
+        if pdb_to_take is None:
+            pdb_to_take = dict(self._default_pdb_input_key)
+        if pdb_key is not None:
+            pdb_to_take["pdb_key"] = pdb_key
+        if binder_chain is not None:
+            pdb_to_take["binder_chain"] = binder_chain
+        if target_chain is not None:
+            pdb_to_take["target_chain"] = target_chain
+        super().config_pdb_input_key(pdb_to_take)
+
+    @property
+    def pdb_to_take(self) -> dict[str, str]:
+        """
+        Hotspots are usually defined on the full target pdb.
+        """
+        if not hasattr(self, "_pdb_to_take"):
+            self.config_pdb_input_key()
+        return self._pdb_to_take
+
+    def process_record(self, input: DesignRecord):
+        config = self.pdb_to_take
+        cmd.load(input.pdb_files[config["pdb_key"]], input.id)
+        hotspots: list[ResidueKey] = hotspots_by_ligand(
+            input.id,
+            config["target_chain"],
+            config["binder_chain"],
+        )["hotspots"]
+        input.set_metrics(f"{self.metrics_prefix}hotspots", hotspots)
+        cmd.delete(input.id)
+        cmd.delete("complex")
+        cmd.delete("target")
+
+    def merge_hotspots(self, batch: DesignBatch):
+        consensus_ratio = self.settings.adv.setdefault("hotspot:consensus_ratio", 0.8)
+        threshold = int(len(batch) * consensus_ratio)
+        hotspots_count = {}
+        for record in batch:
+            for hotspot in record.get_metrics("graft:hotspots", []):
+                hotspots_count[hotspot] = hotspots_count.get(hotspot, 0) + 1
+        selected_hotspots = [k for k, v in hotspots_count.items() if v >= threshold]
+        batch.log({"selected_hotspots": selected_hotspots})
+        return {
+            "hotspots_count": hotspots_count,
+            "selected_hotspots": selected_hotspots,
+        }
+
+    @property
+    def _default_metrics_prefix(self) -> str:
+        return f'{self.pdb_to_take["pdb_key"]}{NEST_SEP}'
+
+    @property
+    def metrics_to_add(self):
+        return (f"{self.metrics_prefix}hotspots",)

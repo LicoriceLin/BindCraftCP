@@ -216,9 +216,8 @@ class Hallucinate(BaseStep):
                     global_id+=1
                     ids.append(design_id)
                     pbar.update(1)
-        # batch_slice=batch.filter(lambda x: x.id.startswith(binder_settings.binder_name))
         batch_slice=batch[ids]
-        return batch_slice # batch #
+        return batch_slice
     
 # Get pLDDT of best model
 def get_best_plddt(af_model, length):

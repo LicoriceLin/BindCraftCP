@@ -285,12 +285,22 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.create(f'{mobile}-aln',f'{mobile} and ({mobile_sel})')
     cmd.create(f'{target}-aln',f'{target} and ({target_sel})')
     ret1=cmd.align(f'{mobile}-aln',f'{target}-aln')
-    cmd.align(f'{mobile} and ({mobile_sel})',mobile_sel)
+    cmd.align(f'{mobile} and ({mobile_sel})',f'{mobile}-aln')
     cmd.delete(f'{mobile}-aln')
     cmd.delete(f'{target}-aln')
     ret2=cmd.align(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' ,cycles=0,transform=0)[0]
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
 
+def partial_align_noobj(mobile:str,mobile_sel:str,target:str,target_sel:str|None=None):
+    if target_sel is None:
+        target_sel=mobile_sel
+    cmd.create(f'{mobile}-aln',f'{mobile} and ({mobile_sel})')
+    cmd.create(f'{target}-aln',f'{target} and ({target_sel})')
+    ret1=cmd.align(f'{mobile}-aln',f'{target}-aln')
+    cmd.align(f'{mobile} and ({mobile_sel})',f'{mobile}-aln')
+    cmd.delete(f'{mobile}-aln')
+    cmd.delete(f'{target}-aln')
+    return {'align_rmsd':ret1[0]}
 
 def sort_distance_to_hotspots(obj:str,hotspot_list:List[ResidueKey])->List[ResidueKey]:
     '''
