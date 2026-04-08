@@ -548,6 +548,9 @@ class PseudoHotspot(BaseStep):
 
 
 class AnnotHotspot(BaseStep):
+    '''
+    human legacy
+    '''
     def __init__(self, settings: GlobalSettings):
         super().__init__(settings)
 
