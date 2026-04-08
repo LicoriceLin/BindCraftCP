@@ -51,7 +51,8 @@ class DesignRecord:
             pdbfile=self.pdb_files[pdb_key]
         else:
             self.pdb_files[pdb_key]=pdbfile
-        self.pdb_strs[pdb_key]=open(pdb_key,'r').read()
+        with open(pdbfile,'r') as f:
+            self.pdb_strs[pdb_key]=f.read()
 
     def has_pdb(self,pdb_key:str)->bool:
         if pdb_key in self.pdb_files or  pdb_key in self.pdb_strs:
@@ -246,7 +247,7 @@ class DesignBatch:
         won't saving data in memory to disk.
         '''
         cache_dir=Path(cache_dir)
-        cache_dir.mkdir(exist_ok=True)
+        cache_dir.mkdir(exist_ok=True,parents=True)
         for k,v in self.records.items():
             ori=self.cache_dir/f'{v.id}.json'
             new_record=cache_dir/f'{v.id}.json'
@@ -260,7 +261,7 @@ class DesignBatch:
         if self.log_json.exists():
             new_log=cache_dir/(self.log_json.stem+'.json')
             if not new_log.exists():
-                os.symlink(self.log_json.absolute(),new_record)
+                os.symlink(self.log_json.absolute(),new_log)
         return DesignBatch.from_cache(cache_dir)
 
 
@@ -330,4 +331,3 @@ class DesignBatchSlice(DesignBatch):
     def set_overwrite(self, overwrite):
         raise NotImplementedError("This is a Slice. Set on its parent.")
     
-

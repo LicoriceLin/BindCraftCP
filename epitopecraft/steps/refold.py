@@ -48,9 +48,9 @@ class Refold(BaseStep):
     @property
     def _default_pdb_input_key(self):
         if self.settings.adv.get('templated',False):
-            return 'halu'
+            return 'template'
         else:
-            return 'templated'
+            return 'halu'
     
     def config_complex_model(self,record:DesignRecord):
         '''
@@ -111,7 +111,10 @@ class Refold(BaseStep):
         advanced_settings,s=self.settings.adv,self.settings
         for model_num in self.prediction_models:
             refold_id_c=f'{prefix}multimer-{model_num+1}'
-            if refold_id_c not in record.metrics:
+            if not (
+                record.has_pdb(refold_id_c)
+                and record.has_metric(f'{refold_id_c}{NEST_SEP}pLDDT')
+            ):
                 c_model.predict(seq=binder_sequence, models=[model_num], 
                     num_recycles=advanced_settings["num_recycles_validation"], 
                     verbose=False,seed=s.binder_settings.global_seed)
@@ -121,14 +124,17 @@ class Refold(BaseStep):
                      'i-pTM':'i_ptm','pAE':'pae',
                      'i-pAE':'i_pae'}.items()}
                 record.update_metrics(metrics)
-            
+        
         for model_num in self.prediction_models:
             refold_id_m=f'{prefix}monomer-{model_num+1}'
-            if refold_id_m not in metrics:
+            if not (
+                record.has_pdb(refold_id_m)
+                and record.has_metric(f'{refold_id_m}{NEST_SEP}pLDDT')
+            ):
                 m_model.predict(models=[model_num], 
                     num_recycles=advanced_settings["num_recycles_validation"], verbose=False,
                     seed=s.binder_settings.global_seed)
-                record.pdb_strs[refold_id_m]=c_model.save_pdb(None,get_best=False)
+                record.pdb_strs[refold_id_m]=m_model.save_pdb(None,get_best=False)
                 metrics={refold_id_m+':'+k:m_model.aux['log'][v] for k,v in 
                     {'pLDDT':'plddt','pTM':'ptm',
                      'pAE':'pae'}.items()}

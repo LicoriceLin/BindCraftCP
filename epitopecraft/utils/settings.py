@@ -132,9 +132,10 @@ class TargetSettings(BaseSettings):
     full_binder_chain:str=field(repr=False,init=False,default='B')
     new_binder_chain:str=field(repr=False,init=False,default='')
     def __post_init__(self):
-        if self.starting_pdb is None and self. full_target_pdb is None:
+        if self.starting_pdb is None and self.full_target_pdb is None:
             raise ValueError('`starting_pdb` essential for ColabDesign and `full_target_pdb` essential for BoltzGen')
-        # if self.starting_pdb is None:
+        if self.starting_pdb is not None and self.full_target_pdb is None:
+            self.full_target_pdb=self.starting_pdb
         #     self.starting_pdb=self.full_target_pdb
         if self.full_target_chain is not None:
             if self.full_binder_chain in self.full_target_chain:

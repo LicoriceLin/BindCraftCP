@@ -4,7 +4,7 @@ from ..steps import (Hallucinate,Filter,Refold,Graft,AnnotRMSD,AnnotGyration,
 
 from ..utils import (
     TargetSettings,GlobalSettings,AdvancedSettings,
-    FilterSettings,BinderSettings,NEST_SEP,DesignRecord
+    FilterSettings,BinderSettings,NEST_SEP,DesignRecord,_load_json_or_yaml
     )
 from ..utils.settings import BaseSettings,dataclass
 from .base_pipeline import BasePipeline,_dir_path
@@ -22,7 +22,7 @@ def init_hallu_settings(
     cyclic_peptide:bool=False,
     patch:str|Dict[str,Any]|None=None,
     filters:str|None=None):
-    advanced_paths=[_dir_path/'config/base_adv_setting.json']
+    advanced_paths=[_dir_path/'config/base_advanced_settings.yaml']
     if stage4_montecarlo:
         advanced_paths.append(_dir_path/'config/patch_4s_mc.json')
     if template:
@@ -33,19 +33,19 @@ def init_hallu_settings(
         patch={}
     else:
         if isinstance(patch,str):
-            patch=json.load(open(patch,'r'))
+            patch=_load_json_or_yaml(patch)
     if filters is None:
-        filters = _dir_path/'config/default_filter.json'
+        filters = _dir_path/'config/default_filter.yaml'
     
     settings=GlobalSettings(
-        target_settings=TargetSettings.from_json(target_settings),
-        binder_settings=BinderSettings.from_json(binder_settings),
+        target_settings=TargetSettings.from_file(target_settings),
+        binder_settings=BinderSettings.from_file(binder_settings),
         advanced_settings=AdvancedSettings(
             advanced_paths=advanced_paths,
             extra_patch=patch),
-        filter_settings=FilterSettings(filters_path=filters)
+        filter_settings=FilterSettings.from_file(filters)
         )
-    settings.adv['mpnn_bias_recipe']='config/mpnn-recipes.json'
+    settings.adv['mpnn_bias_recipe']=str(_dir_path/'config/mpnn-recipes.json')
     return settings
 
 @dataclass
@@ -171,7 +171,6 @@ class HalluDesign(BasePipeline):
         
         batch=_final_scores(batch)
 
-        self.settings.binder_settings.binder_name='backup-settinga'
         self._save_settings()
         return batch
     

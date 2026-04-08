@@ -1,0 +1,14 @@
+bg_color white
+set ray_trace_mode, 1
+set ray_shadow, off
+set antialias, 2
+set ambient, 0.6
+set specular, 0.5
+set reflect, 0.2
+set ray_opaque_background, 0
+# set ray_trace_color white
+# color: deepteal & palecyan
+# color: grey60 & cyan & ?
+# ray 1920, 1080
+ray 960, 540
+png output_image.png, dpi=300

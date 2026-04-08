@@ -19,7 +19,7 @@ class BasePipeline(ABC):
         else:
             self.settings=GlobalSettings.from_file(global_settings)
         self.design_path=Path(self.settings.binder_settings.design_path)
-        self.design_path.mkdir(exist_ok=True)
+        self.design_path.mkdir(exist_ok=True,parents=True)
         self._save_settings()
         self._init_steps()
 

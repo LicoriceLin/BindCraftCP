@@ -103,3 +103,42 @@ def known_binder_topk_motifs(
     cmd.delete('complex')
     cmd.delete('target')
     cmd.delete(f'{stem}_ori')
+
+def hotspots_topk_motifs(
+    pdb:str,
+    hotspot_list:list,
+    output_dir:str='motif',
+    topk_ranges:List[int]=[50,100,150,200,250,300],
+    stem:str|None=None
+    ):
+    '''
+    hotspot_list uses the same format as `hotspots['hotspots']`,
+    e.g. [('A', '12'), ('A', '17'), ('B', '5')].
+    '''
+    if stem is None:
+        stem=Path(pdb).stem
+    Path(output_dir).mkdir(exist_ok=True,parents=True)
+    cmd.load(pdb,stem+'_ori')
+    cmd.create('target',stem+'_ori')
+    cmd.save(f'{output_dir}/{stem}-full.pdb','target')
+    with open(f'{output_dir}/{stem}-hotspot.json','w') as f:
+        json.dump({'hotspots':hotspot_list},f,indent=2)
+
+    other_res_sorted_list=sort_distance_to_hotspots('target',hotspot_list)
+    for i in topk_ranges:
+        top_k_list=top_k_epitope('target',hotspot_list,other_res_sorted_list,k=i)
+        cmd.save(f'{output_dir}/{stem}-{i}.pdb',f'target_top{i}')
+
+    # visualization
+    res=_reduce_hotspot_list(hotspot_list)
+    res_sel=[]
+    for k,v in res.items():
+        res_sel.append(f'(chain {k} and resi {",".join([str(i) for i in v])})')
+    cmd.select('hotspots',f'target and ( {" or ".join(res_sel) } )')
+    cmd.disable(stem+'_ori')
+    cmd.remove('hydro')
+    cmd.show('licorice','hotspots')
+    cmd.color('warmpink','hotspots and element C')
+    cmd.save(f'{output_dir}/{stem}.pse')
+    cmd.delete('target')
+    cmd.delete(f'{stem}_ori')

@@ -5,6 +5,8 @@ from Bio.Data.IUPACData import protein_letters_3to1
 import pandas as pd
 from typing import Optional,List,Tuple,Dict
 from pathlib import Path
+from uuid import uuid4
+ResidueKey = Tuple[str, str]
 
 ### pre-process ###
 def default_vis_config():
@@ -116,8 +118,115 @@ def _to_sel(chain:str, resi:str,obj:str=''):
         sel += f' and {obj}'
     return sel
 
+
+def _normalize_resi_id(resi:str):
+    return int(resi) if resi.isdigit() else resi
+
+
+def map_aligned_residues(
+    mobile_obj:str,
+    target_obj:str,
+    mobile_chain:str='A',
+    target_chain:Optional[str]=None,
+    cycles:int=0,
+)->Dict[ResidueKey,ResidueKey]:
+    '''
+    Align `mobile_obj` chain to `target_obj` chain and return residue mapping.
+
+    Returns:
+        {(mobile_chain, mobile_resi): (target_chain, target_resi), ...}
+    '''
+    if target_chain is None:
+        target_chain = mobile_chain
+
+    aln_name = f'aln_{uuid4().hex}'
+    mobile_sel = f'{mobile_obj} and polymer.protein and chain {mobile_chain} and name CA'
+    target_sel = f'{target_obj} and polymer.protein and chain {target_chain} and name CA'
+    cmd.align(mobile_sel, target_sel, object=aln_name, cycles=cycles)
+
+    idx_to_atom = {}
+    for obj_name, chain in ((mobile_obj, mobile_chain), (target_obj, target_chain)):
+        model = cmd.get_model(f'{obj_name} and polymer.protein and chain {chain} and name CA')
+        for atom in model.atom:
+            idx_to_atom[(obj_name, atom.index)] = (atom.chain, _normalize_resi_id(atom.resi))
+
+    residue_map = {}
+    for pair in cmd.get_raw_alignment(aln_name):
+        mobile_info = None
+        target_info = None
+        for obj_name, atom_index in pair:
+            atom_info = idx_to_atom.get((obj_name, atom_index))
+            if atom_info is None:
+                continue
+            atom_info=tuple([str(i) for i in atom_info])
+            if obj_name == mobile_obj:
+                mobile_info = atom_info
+            elif obj_name == target_obj:
+                target_info = atom_info
+        if mobile_info is not None and target_info is not None:
+            residue_map[mobile_info] = target_info
+
+    cmd.delete(aln_name)
+    return residue_map
+
+
+def map_residues_between_pdbs(
+    pdb_design:str,
+    pdb_target:str,
+    chain_target:str='A',
+    chain_ref:Optional[str]=None,
+    cycles:int=0,
+)->Dict[ResidueKey,ResidueKey]:
+    '''
+    Load two PDB files, align `chain_target` from `pdb_design` onto `pdb_target`,
+    and return the residue-level mapping.
+    '''
+    design_obj = f'design_{uuid4().hex}'
+    target_obj = f'target_{uuid4().hex}'
+    cmd.load(pdb_design, design_obj)
+    cmd.load(pdb_target, target_obj)
+    try:
+        return map_aligned_residues(
+            mobile_obj=design_obj,
+            target_obj=target_obj,
+            mobile_chain=chain_target,
+            target_chain=chain_ref,
+            cycles=cycles,
+        )
+    finally:
+        cmd.delete(design_obj)
+        cmd.delete(target_obj)
+
 ### target seg selection ###
 def hotspots_by_ligand(obj:str,target_chain:str,ligand_chain:str):
+    '''
+    Identify target-chain hotspot residues by comparing target SASA in the
+    complex and isolated target states.
+
+    This function creates two fixed-name PyMOL objects:
+    - `complex`: `obj` restricted to `target_chain` + `ligand_chain`
+    - `target`: `obj` restricted to `target_chain`
+
+    Warning:
+    - `complex` and `target` are left in the PyMOL session
+    - existing objects with the same names may be overwritten
+
+    They are not deleted here for compatibility with
+    `known_binder_range_motifs` and `known_binder_topk_motifs` in
+    `epitopecraft.utils.preprocess`, which reuse them after return.
+
+    Args:
+        obj: Source PyMOL object containing both target and ligand chains.
+        target_chain: Target chain id(s), e.g. `'A'` or `'A,B'`.
+        ligand_chain: Ligand/binder chain id(s), e.g. `'B'`.
+
+    Returns:
+        A dict with:
+        - `hotspots`: list of `(chain, resi)` residues on the target whose
+          relative SASA decreases in the complex
+        - `holo_rsasa`: residue rSASA values measured on `complex`
+        - `apo_rsasa`: residue rSASA values measured on `target`
+    '''
     cmd.create('complex',f'{obj} and (chain {target_chain},{ligand_chain})')
     holo_rsasa=rSASA('complex',f'{target_chain},{ligand_chain}')
     cmd.create('target',f'{obj} and (chain {target_chain})')
@@ -129,7 +238,7 @@ def hotspots_by_ligand(obj:str,target_chain:str,ligand_chain:str):
             hotspots.append(k)
     return {'hotspots':hotspots,'holo_rsasa':holo_rsasa,'apo_rsasa':apo_rsasa}
 
-def _reduce_hotspot_list(hotspots:List[Tuple[str,str]]):
+def _reduce_hotspot_list(hotspots:List[ResidueKey]):
     res={}
     for h in hotspots:
         res.setdefault(h[0],[]).append(h[1]) #int(h[1])
@@ -142,7 +251,7 @@ def _sort_resi_list(resi_list:List[str]):
         return int(s), '' 
     return sorted(resi_list, key=key)
 
-def hotspots_to_seg_continue(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='continue_seg',pad=25):
+def hotspots_to_seg_continue(obj:str,hotspots:List[ResidueKey],opt_obj:str='continue_seg',pad=25):
     def _tmp(s:str):
         if s[-1].isalpha():  
             return int(s[:-1])
@@ -155,7 +264,7 @@ def hotspots_to_seg_continue(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='
         res_be.append(f'(chain {k} and resi {max(min_v-pad,1)}-{max_v+pad})')
     cmd.copy_to(opt_obj,f'{obj} and ( {" or ".join(res_be) } )')
 
-def hotspots_to_seg_surf(obj:str,hotspots:List[Tuple[str,str]],opt_obj:str='surf',vicinity=10):
+def hotspots_to_seg_surf(obj:str,hotspots:List[ResidueKey],opt_obj:str='surf',vicinity=10):
     res=_reduce_hotspot_list(hotspots)
     res_sel=[]
     for k,v in res.items():
@@ -183,7 +292,7 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
 
 
-def sort_distance_to_hotspots(obj:str,hotspot_list:list)->list:
+def sort_distance_to_hotspots(obj:str,hotspot_list:List[ResidueKey])->List[ResidueKey]:
     '''
     obj: curated pymol object (e.g. no water/ions, no alt)
     hotspot_list: [('A',12),('A',17),('B',5),...]
@@ -210,7 +319,7 @@ def sort_distance_to_hotspots(obj:str,hotspot_list:list)->list:
     other_res_sorted = [other_res[i] for i in order]
     return other_res_sorted
 
-def top_k_epitope(obj:str,hotspot_list:list,other_res_sorted_list:list,k=100):
+def top_k_epitope(obj:str,hotspot_list:List[ResidueKey],other_res_sorted_list:List[ResidueKey],k=100):
     more_needed=k - len(hotspot_list)
     remaining=len(other_res_sorted_list)
 
