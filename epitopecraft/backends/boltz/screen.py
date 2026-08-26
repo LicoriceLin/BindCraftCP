@@ -216,9 +216,10 @@ class Boltz2Screen(Step):
             raise RuntimeError("Boltz2Screen requires PipelineRunner(run_dir=...)")
         reference = target.reference or ReferenceModel.from_target(full_structure=target)
         target_path = self._materialize_target(target, reference, step_dir)
-        input_dir = step_dir / "inputs"
-        input_dir.mkdir(parents=True, exist_ok=True)
+        input_root = step_dir / "inputs"
+        input_root.mkdir(parents=True, exist_ok=True)
         cases: dict[str, tuple[Any, dict[str, Any]]] = {}
+        groups: dict[str, list[str]] = {"structure": [], "affinity": []}
         for index, candidate in enumerate(candidates):
             if not isinstance(candidate, (ProteinCandidate, SmallMoleculeCandidate)):
                 raise TypeError(f"Unsupported screening candidate: {type(candidate)}")
@@ -230,15 +231,34 @@ class Boltz2Screen(Step):
                 self.config,
                 target_path=target_path,
             )
+            group = "affinity" if payload.get("properties") else "structure"
+            input_dir = input_root / group
+            input_dir.mkdir(parents=True, exist_ok=True)
             yaml_path = input_dir / f"{case_id}.yaml"
             yaml_path.write_text(yaml.safe_dump(payload, sort_keys=False))
             cases[case_id] = (candidate, payload)
-        run_root = step_dir / "run"
-        command = build_boltz2_command(self.config, input_dir, run_root)
-        subprocess.run(command, check=True)
-        predictions = run_root / f"boltz_results_{input_dir.stem}" / "predictions"
+            groups[group].append(case_id)
+
+        prediction_roots: dict[str, Path] = {}
+        for group, case_ids in groups.items():
+            if not case_ids:
+                continue
+            input_dir = input_root / group
+            run_root = step_dir / "run" / group
+            command = build_boltz2_command(self.config, input_dir, run_root)
+            subprocess.run(command, check=True)
+            predictions = (
+                run_root / f"boltz_results_{input_dir.stem}" / "predictions"
+            )
+            prediction_roots.update({case_id: predictions for case_id in case_ids})
         designs = [
-            self._read_case(case_id, candidate, payload, predictions, reference)
+            self._read_case(
+                case_id,
+                candidate,
+                payload,
+                prediction_roots[case_id],
+                reference,
+            )
             for case_id, (candidate, payload) in cases.items()
         ]
         return {"designs": DesignSet.from_designs(designs)}

@@ -116,6 +116,7 @@ known-site small-molecule structure plus affinity prediction.
 
 ## Developer documentation
 
+- [Executable core-v2 walkthrough](demo.ipynb)
 - [Core architecture](docs/architecture/core-v2.md)
 - [Step contract](docs/architecture/step-contract.md)
 - [Artifact and residue mapping](docs/architecture/artifact-model.md)

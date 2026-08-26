@@ -1,4 +1,5 @@
 from epitopecraft.backends.boltz.screen import (
+    Boltz2Screen,
     Boltz2ScreenConfig,
     build_boltz2_command,
     build_boltz2_input,
@@ -9,7 +10,8 @@ from epitopecraft.core.artifacts import (
     SelectionArtifact,
     StructureArtifact,
 )
-from epitopecraft.core.design import ProteinCandidate, SmallMoleculeCandidate
+from epitopecraft.core.config import PipelineConfig
+from epitopecraft.core.design import Design, ProteinCandidate, SmallMoleculeCandidate
 
 
 def target_pdb():
@@ -74,3 +76,52 @@ def test_boltz2_command_exposes_structure_and_affinity_sampling(tmp_path):
     assert "--diffusion_samples 2" in rendered
     assert "--sampling_steps_affinity 20" in rendered
     assert "--override" in command
+
+
+def test_mixed_candidates_run_in_separate_affinity_groups(tmp_path, monkeypatch):
+    """Protein cases must not enter a Boltz affinity batch."""
+
+    target = StructureArtifact.from_text("target", target_pdb())
+    site = SelectionArtifact(
+        "known_site",
+        (CanonicalResidueId("target:X", 1),),
+    )
+    candidates = (ProteinCandidate("ACDE"), SmallMoleculeCandidate("CCO"))
+    step = Boltz2Screen("screen")
+    step.resolve_config(PipelineConfig())
+
+    commands = []
+    monkeypatch.setattr(
+        "epitopecraft.backends.boltz.screen.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+    monkeypatch.setattr(
+        step,
+        "_read_case",
+        lambda case_id, candidate, payload, predictions, reference: Design(
+            case_id,
+            candidate,
+            metrics={"prediction_root": str(predictions)},
+        ),
+    )
+
+    class Context:
+        @staticmethod
+        def step_dir(step_id):
+            return tmp_path / step_id
+
+    result = step.execute(
+        {"target": target, "site": site, "candidates": candidates},
+        Context(),
+    )
+
+    assert len(commands) == 2
+    input_dirs = {command[command.index("predict") + 1] for command in commands}
+    assert input_dirs == {
+        str(tmp_path / "screen" / "inputs" / "structure"),
+        str(tmp_path / "screen" / "inputs" / "affinity"),
+    }
+    protein = result["designs"]["candidate_00000"]
+    ligand = result["designs"]["candidate_00001"]
+    assert "/structure/" in protein.metrics["prediction_root"]
+    assert "/affinity/" in ligand.metrics["prediction_root"]
