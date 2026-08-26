@@ -8,6 +8,7 @@ from tqdm import tqdm
 class Refold(BaseStep):
     def __init__(self,settings:GlobalSettings):
         self.templated=settings.adv.setdefault('templated',False)
+        self.run_monomer=settings.adv.setdefault(f'{self.name}-run-monomer',True)
         super().__init__(settings)
         
     
@@ -22,9 +23,10 @@ class Refold(BaseStep):
         for i in [f'{prefix}multimer-{n+1}' for n in self.prediction_models]:
             for k in ['pLDDT','pTM','i-pTM','pAE','i-pAE']:
                 ret.append(f'{i}{NEST_SEP}{k}')
-        for i in [f'{prefix}monomer-{n+1}' for n in self.prediction_models]:
-            for k in ['pLDDT','pTM','pAE']:
-                ret.append(f'{i}{NEST_SEP}{k}')
+        if self.run_monomer:
+            for i in [f'{prefix}monomer-{n+1}' for n in self.prediction_models]:
+                for k in ['pLDDT','pTM','pAE']:
+                    ret.append(f'{i}{NEST_SEP}{k}')
         ret.append(f'{prefix}best{NEST_SEP}i-pAE')
         return tuple(ret)
     
@@ -32,7 +34,8 @@ class Refold(BaseStep):
     def pdb_to_add(self):
         prefix=self.metrics_prefix
         ret=[f'{prefix}multimer-{n+1}' for n in self.prediction_models]
-        ret.extend([f'{prefix}monomer-{n+1}' for n in self.prediction_models])
+        if self.run_monomer:
+            ret.extend([f'{prefix}monomer-{n+1}' for n in self.prediction_models])
         ret.append(f'{prefix}best')
         return tuple(ret)
     
@@ -42,7 +45,8 @@ class Refold(BaseStep):
             f'{self.name}-prefix',f'{self.name}-pdb-input',
             'use_multimer_design','num_recycles_validation',
             'rm_template_seq_predict','rm_template_sc_predict',
-            'rm_template_ic_predict','cyclize_peptide','templated'
+            'rm_template_ic_predict','cyclize_peptide','templated',
+            f'{self.name}-run-monomer'
         ]
         return tuple(ret)
     
@@ -105,14 +109,14 @@ class Refold(BaseStep):
     def prediction_models(self):
         return [0,1] if self.settings.adv['use_multimer_design'] else [0,1,2,3,4]
     
-    def refold(self,record:DesignRecord)->DesignRecord:
+    def refold(self,record:DesignRecord, overwrite:bool=False)->DesignRecord:
         prefix=self.metrics_prefix
-        c_model,m_model=self.complex_prediction_model,self.binder_prediction_model
+        c_model=self.complex_prediction_model
         binder_sequence=record.sequence
         advanced_settings,s=self.settings.adv,self.settings
         for model_num in self.prediction_models:
             refold_id_c=f'{prefix}multimer-{model_num+1}'
-            if not (
+            if overwrite or not (
                 record.has_pdb(refold_id_c)
                 and record.has_metric(f'{refold_id_c}{NEST_SEP}pLDDT')
             ):
@@ -126,27 +130,29 @@ class Refold(BaseStep):
                      'i-pAE':'i_pae'}.items()}
                 record.update_metrics(metrics)
         
-        for model_num in self.prediction_models:
-            refold_id_m=f'{prefix}monomer-{model_num+1}'
-            if not (
-                record.has_pdb(refold_id_m)
-                and record.has_metric(f'{refold_id_m}{NEST_SEP}pLDDT')
-            ):
-                m_model.predict(models=[model_num], 
-                    num_recycles=advanced_settings["num_recycles_validation"], verbose=False,
-                    seed=s.binder_settings.global_seed)
-                record.pdb_strs[refold_id_m]=m_model.save_pdb(None,get_best=False)
-                metrics={refold_id_m+':'+k:m_model.aux['log'][v] for k,v in 
-                    {'pLDDT':'plddt','pTM':'ptm',
-                     'pAE':'pae'}.items()}
-                record.update_metrics(metrics)
+        if self.run_monomer:
+            m_model=self.binder_prediction_model
+            for model_num in self.prediction_models:
+                refold_id_m=f'{prefix}monomer-{model_num+1}'
+                if overwrite or not (
+                    record.has_pdb(refold_id_m)
+                    and record.has_metric(f'{refold_id_m}{NEST_SEP}pLDDT')
+                ):
+                    m_model.predict(seq=binder_sequence, models=[model_num],
+                        num_recycles=advanced_settings["num_recycles_validation"], verbose=False,
+                        seed=s.binder_settings.global_seed)
+                    record.pdb_strs[refold_id_m]=m_model.save_pdb(None,get_best=False)
+                    metrics={refold_id_m+':'+k:m_model.aux['log'][v] for k,v in 
+                        {'pLDDT':'plddt','pTM':'ptm',
+                         'pAE':'pae'}.items()}
+                    record.update_metrics(metrics)
         
         return record
     
-    def _sel_best_refold(self,record:DesignRecord):
+    def _sel_best_refold(self,record:DesignRecord, overwrite:bool=False):
         refolder=self
         prefix=refolder.metrics_prefix
-        if f'{prefix}best' in record.pdb_files:
+        if f'{prefix}best' in record.pdb_files and not overwrite:
             return
         ipaes=[]
         for i in refolder.pdb_to_add:
@@ -159,7 +165,7 @@ class Refold(BaseStep):
             record.pdb_strs[f'{prefix}best']=record.pdb_strs[ipaes[0][0]]
         record.set_metrics(f'{prefix}best{NEST_SEP}i-pAE',ipaes[0][1])
 
-    def purge_record(self,record:DesignRecord):
+    def purge_record(self,record:DesignRecord, overwrite:bool=False):
         '''
         create self.pdb_purge_dir/{multimer,monomer}
         purge refold structure from different af2 model to it.
@@ -176,14 +182,16 @@ class Refold(BaseStep):
                 if refold_id_m in record.pdb_strs:
                     record.purge_pdb(refold_id_m,
                         self.pdb_purge_dir/'monomer'/f'{record.id}-{model_num+1}.pdb')
-            self._sel_best_refold(record)
+            self._sel_best_refold(record, overwrite=overwrite)
 
     def config_pdb_purge(self, pdb_purge_stem = None):
         super().config_pdb_purge(pdb_purge_stem)
         if self.pdb_purge_dir is not None:
-            cdir,mdir=self.pdb_purge_dir/'multimer',self.pdb_purge_dir/'monomer'
+            cdir=self.pdb_purge_dir/'multimer'
             cdir.mkdir(parents=True,exist_ok=True)
-            mdir.mkdir(parents=True,exist_ok=True)
+            if self.run_monomer:
+                mdir=self.pdb_purge_dir/'monomer'
+                mdir.mkdir(parents=True,exist_ok=True)
 
     def sort_batch(self,input:DesignBatch)->List[str]:
         if not self.templated:
@@ -193,11 +201,12 @@ class Refold(BaseStep):
             d={k:(len(v.sequence),v.pdb_files[self.pdb_to_take]) for k,v in input.records.items()}
         return sorted(d,key=lambda k:d[k])
 
-    def process_record(self, input: DesignRecord)->DesignRecord:
+    def process_record(self, input: DesignRecord, overwrite:bool=False)->DesignRecord:
         with self.record_time(input):
             self.config_complex_model(input)
-            self.config_monomer_model(input)
-            self.refold(input)
+            if self.run_monomer:
+                self.config_monomer_model(input)
+            self.refold(input, overwrite=overwrite)
             # self._sel_best_refold(input)
         return input    
     
@@ -226,9 +235,9 @@ class Refold(BaseStep):
             self.config_pdb_input_key(pdb_to_take)
         for design_id in tqdm(self.sort_batch(input),desc=f'{self.name}'):
             record=input.records[design_id]
-            if not self.check_processed(record):
-                self.process_record(record)
-                self.purge_record(record)
+            if input.overwrite or not self.check_processed(record):
+                self.process_record(record, overwrite=input.overwrite)
+                self.purge_record(record, overwrite=input.overwrite)
                 input.save_record(design_id)
         self.current_template_pdb=''
         return input
@@ -290,6 +299,12 @@ class Graft(BaseStep):
     def graft_binder(self,record:DesignRecord,):
         ori_key=self.pdb_to_take
         prefix=self.metrics_prefix.strip(NEST_SEP)
+        if (
+            ori_key not in record.pdb_files
+            and ori_key not in record.pdb_strs
+            and record.has_pdb(prefix)
+        ):
+            return record
         with tempfile.TemporaryDirectory() as tdir:
             if ori_key in record.pdb_files:
                 ori_pdb=record.pdb_files[ori_key]

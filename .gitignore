@@ -10,3 +10,4 @@ params
 logs/
 .*/
 **pse
+*.code-workspace

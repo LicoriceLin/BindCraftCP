@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
@@ -18,7 +19,6 @@ from tqdm import tqdm
 from .basestep import BaseStep, DesignBatch, DesignRecord, GlobalSettings
 from .scorer.pymol_utils import ResidueKey, hotspots_by_ligand, map_residues_between_pdbs
 from ..utils import NEST_SEP
-from ..utils.preprocess import hotspots_topk_motifs
 from warnings import warn
 
 class PseudoHotspot(BaseStep):
@@ -126,13 +126,16 @@ class PseudoHotspot(BaseStep):
                 hotspot_df=hotspot_df,
             )
 
-            hotspots_topk_motifs(
-                pdb=self.settings.target_settings.full_target_pdb,
-                hotspot_list=hotspot_list,
-                output_dir=analysis_dir / f"{binder_name}_motif",
-                topk_ranges=motif_sizes,
-                stem=binder_name,
-            )
+            if motif_sizes:
+                self._write_hotspot_motifs(
+                    target_pdb=target_pdb,
+                    hotspot_df=hotspot_df,
+                    hotspot_list=hotspot_list,
+                    output_dir=analysis_dir / f"{binder_name}_motif",
+                    motif_sizes=motif_sizes,
+                    stem=binder_name,
+                    freq_threshold=freq_threshold,
+                )
 
             input.metrics[f"{self.metrics_prefix}analysis_dir"] = str(analysis_dir)
             input.metrics[f"{self.metrics_prefix}target_hotspot_residues"] = hotspot_str
@@ -177,6 +180,151 @@ class PseudoHotspot(BaseStep):
             key=self._residue_sort_key,
         )
         return residues
+
+    def _ranked_hotspots_for_motif(
+        self,
+        hotspot_df: pd.DataFrame,
+        freq_threshold: float,
+    ) -> list[ResidueKey]:
+        selected = []
+        above_threshold = hotspot_df[hotspot_df["freq"] > freq_threshold]
+        if above_threshold.empty:
+            warn("No hotspot residues above motif threshold; using all detected hotspots.")
+            above_threshold = hotspot_df
+
+        for row in above_threshold.itertuples():
+            residue = (str(row.chain), str(row.resi))
+            selected.append((residue, float(row.freq), int(row.group_id)))
+
+        selected.sort(
+            key=lambda item: (
+                -item[1],
+                item[2],
+                self._residue_sort_key(item[0]),
+            )
+        )
+        ranked = []
+        seen = set()
+        for residue, _, _ in selected:
+            if residue not in seen:
+                ranked.append(residue)
+                seen.add(residue)
+        return ranked
+
+    def _target_ca_coord_map_from_object(self, obj_name: str) -> Dict[ResidueKey, np.ndarray]:
+        coord_map: Dict[ResidueKey, np.ndarray] = {}
+        for atom in cmd.get_model(f"{obj_name} and polymer.protein and name CA").atom:
+            key = (str(atom.chain), str(atom.resi))
+            coord_map.setdefault(key, np.array(atom.coord, dtype=float))
+        return coord_map
+
+    def _target_ca_index_map_from_object(self, obj_name: str) -> Dict[ResidueKey, int]:
+        index_map: Dict[ResidueKey, int] = {}
+        for atom in cmd.get_model(f"{obj_name} and polymer.protein and name CA").atom:
+            key = (str(atom.chain), str(atom.resi))
+            index_map.setdefault(key, int(atom.index))
+        return index_map
+
+    def _build_residue_index_selection(
+        self,
+        obj_name: str,
+        residues: Iterable[ResidueKey],
+        ca_index_map: Dict[ResidueKey, int],
+    ) -> str:
+        indices = [str(ca_index_map[residue]) for residue in residues if residue in ca_index_map]
+        if not indices:
+            return ""
+        return f"byres ({obj_name} and index {','.join(indices)})"
+
+    def _motif_residues_for_size(
+        self,
+        target_coord_map: Dict[ResidueKey, np.ndarray],
+        ranked_hotspots: list[ResidueKey],
+        motif_size: int,
+    ) -> list[ResidueKey]:
+        target_residues = sorted(target_coord_map, key=self._residue_sort_key)
+        if motif_size >= len(target_residues):
+            return target_residues
+
+        seeds = [residue for residue in ranked_hotspots if residue in target_coord_map]
+        if not seeds:
+            return []
+
+        if len(seeds) >= motif_size:
+            return seeds[:motif_size]
+
+        seed_set = set(seeds)
+        seed_coords = np.array([target_coord_map[residue] for residue in seeds], dtype=float)
+        remaining = [residue for residue in target_residues if residue not in seed_set]
+        remaining.sort(
+            key=lambda residue: (
+                float(np.linalg.norm(seed_coords - target_coord_map[residue], axis=1).min()),
+                self._residue_sort_key(residue),
+            )
+        )
+        return seeds + remaining[: motif_size - len(seeds)]
+
+    def _write_hotspot_motifs(
+        self,
+        target_pdb: Path,
+        hotspot_df: pd.DataFrame,
+        hotspot_list: list[ResidueKey],
+        output_dir: Path,
+        motif_sizes: Iterable[int],
+        stem: str,
+        freq_threshold: float,
+    ):
+        motif_sizes = [int(size) for size in motif_sizes if int(size) > 0]
+        if not motif_sizes:
+            return
+
+        output_dir.mkdir(exist_ok=True, parents=True)
+        source_obj = f"{stem}_ori"
+        target_obj = "target"
+        cmd.delete("all")
+        cmd.load(str(target_pdb), source_obj)
+        cmd.create(target_obj, source_obj)
+        cmd.save(str(output_dir / f"{stem}-full.pdb"), target_obj)
+        with open(output_dir / f"{stem}-hotspot.json", "w") as f:
+            json.dump({"hotspots": hotspot_list, "motif_sizes": motif_sizes}, f, indent=2)
+
+        target_coord_map = self._target_ca_coord_map_from_object(target_obj)
+        target_ca_index_map = self._target_ca_index_map_from_object(target_obj)
+        ranked_hotspots = self._ranked_hotspots_for_motif(hotspot_df, freq_threshold)
+        for motif_size in motif_sizes:
+            motif_residues = self._motif_residues_for_size(
+                target_coord_map=target_coord_map,
+                ranked_hotspots=ranked_hotspots,
+                motif_size=motif_size,
+            )
+            if len(motif_residues) < motif_size:
+                warn(
+                    f"Only {len(motif_residues)} residues available for "
+                    f"{stem}-{motif_size}.pdb."
+                )
+            if not motif_residues:
+                continue
+            motif_sel = self._build_residue_index_selection(
+                target_obj,
+                motif_residues,
+                target_ca_index_map,
+            )
+            cmd.save(str(output_dir / f"{stem}-{motif_size}.pdb"), motif_sel)
+
+        ranked_hotspots = [residue for residue in ranked_hotspots if residue in target_coord_map]
+        if ranked_hotspots:
+            hotspot_sel = self._build_residue_index_selection(
+                target_obj,
+                ranked_hotspots,
+                target_ca_index_map,
+            )
+            cmd.select("hotspots", hotspot_sel)
+            cmd.remove("hydro")
+            cmd.show("licorice", "hotspots")
+            cmd.color("warmpink", "hotspots and element C")
+        cmd.disable(source_obj)
+        cmd.save(str(output_dir / f"{stem}.pse"))
+        cmd.delete("all")
 
     def _set_param(self, key: str, value, default):
         if value is not None:
@@ -541,10 +689,10 @@ class PseudoHotspot(BaseStep):
     def _residue_sort_key(self, residue: ResidueKey):
         chain, resi = residue
         if resi[:-1].isdigit() and resi[-1].isalpha():
-            return chain, int(resi[:-1]), resi[-1]
+            return chain, 0, int(resi[:-1]), resi[-1]
         if resi.isdigit():
-            return chain, int(resi), ""
-        return chain, resi, ""
+            return chain, 0, int(resi), ""
+        return chain, 1, str(resi), ""
 
 
 class AnnotHotspot(BaseStep):

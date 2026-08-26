@@ -217,14 +217,20 @@ class PenaltyRecipe:
             self.select_func_expr=select_func_expr
         self.penalties_aas=penalties_aas
         self.penalties=penalties_values
+
+    def _get_selected_positions(self,track_df:pd.DataFrame)->List[int]:
+        sel=track_df.apply(self.select_func,axis=1).astype(bool)
+        if sel.any():
+            return track_df.loc[sel].index.to_list()
+        else:
+            return []
     
     def add_bias(self,track_df:pd.DataFrame,bias:np.ndarray):
         '''
         track_df: pd.DataFrame(ana_track)
         '''
-        sel=track_df.apply(self.select_func,axis=1).astype(bool)
-        if sel.any():
-            pos=track_df.loc[sel].index.to_list()
+        pos=self._get_selected_positions(track_df)
+        if pos:
             if 'fix' not in self.penalties_aas:
                 for k,aas in self.penalties_aas.items():
                     penalty=self.penalties.get(k,0.)
@@ -256,7 +262,39 @@ class PenaltyRecipe:
 
     @classmethod
     def from_dict(cls,d:dict):
-        return cls(**d)
+        d=d.copy()
+        recipe_type=d.pop('type',None)
+        recipe_cls=_penalty_recipe_registry.get(recipe_type,cls)
+        if recipe_type is not None and recipe_cls is cls:
+            raise ValueError(f'Unknown penalty recipe type: {recipe_type}')
+        return recipe_cls(**d)
+
+
+class RewardInputSequenceRecipe(PenaltyRecipe):
+    def __init__(self,name:str,
+        reward_value:float=_default_penalties_values['Sr'],
+        select_func_expr:str="lambda s: True",
+        select_func:Callable[[pd.Series],bool]|None=None
+        ):
+        super().__init__(
+            name=name,
+            select_func_expr=select_func_expr,
+            penalties_aas={},
+            penalties_values=_default_penalties_values,
+            select_func=select_func)
+        self.reward_value=reward_value
+
+    def add_bias(self,track_df:pd.DataFrame,bias:np.ndarray):
+        pos=self._get_selected_positions(track_df)
+        if pos:
+            aa=[aa_order[track_df.at[i,'seq']] for i in pos]
+            bias[np.array(pos),np.array(aa)] += self.reward_value
+        return bias
+
+
+_penalty_recipe_registry={
+    'reward_input_sequence':RewardInputSequenceRecipe,
+}
         
 
 def is_pickleable(obj) -> bool:

@@ -1,10 +1,78 @@
 from .basestep import *
 from epitopecraft.steps.scorer.pymol_utils import *
 from pymol import cmd
+import re
 import yaml
 from subprocess import run
 from warnings import warn
 from glob import glob
+
+
+def _load_chain_residue_spec(spec)->Dict[str,List[str]|str]:
+    if spec in (None,''):
+        return {}
+
+    if isinstance(spec, dict):
+        ret={}
+        for chain, residues in spec.items():
+            if residues == 'all':
+                ret[str(chain)]='all'
+            elif isinstance(residues, str):
+                ret[str(chain)]=[i for i in re.split(r'[\s,]+', residues.strip()) if i]
+            else:
+                ret[str(chain)]=[str(i) for i in residues if str(i)]
+        return ret
+
+    if isinstance(spec, (list,tuple,set)):
+        tokens=[str(i).strip() for i in spec if str(i).strip()]
+    elif isinstance(spec, str):
+        spec_path=Path(spec)
+        if spec_path.exists():
+            text=spec_path.read_text()
+        else:
+            text=spec
+        tokens=[i for i in re.split(r'[\s,]+', text.strip()) if i]
+    else:
+        raise TypeError(f'unsupported residue spec type: {type(spec)}')
+
+    ret={}
+    for token in tokens:
+        if token.lower() == 'all':
+            raise ValueError('ambiguous residue token `all`; use a dict like {"A":"all"} to specify per-chain masks.')
+        chain,resi=token[0],token[1:]
+        if not chain or not resi:
+            raise ValueError(f'invalid residue token: {token}')
+        _=ret.setdefault(chain,[])
+        _.append(resi)
+    return ret
+
+
+def _map_chain_residue_spec(
+    residue_spec:Dict[str,List[str]|str],
+    id_map:Dict[str,Dict[str,str]],
+    label:str,
+    )->Dict[str,List[str]|str]:
+    mapped={}
+    missing=[]
+    for chain,residues in residue_spec.items():
+        if chain not in id_map:
+            missing.append(f'{chain}:<chain missing>')
+            continue
+        if residues == 'all':
+            mapped[chain]='all'
+            continue
+        for resi in residues:
+            mapped_resi=id_map[chain].get(resi)
+            if mapped_resi is None:
+                missing.append(f'{chain}{resi}')
+                continue
+            _=mapped.setdefault(chain,[])
+            _.append(mapped_resi)
+    if missing:
+        raise ValueError(f'failed to map {label} residues onto target indices: {missing}')
+    return mapped
+
+
 class BolzGenSampler(BaseStep):
     def __init__(self,
         settings:GlobalSettings,
@@ -41,17 +109,30 @@ class BolzGenSampler(BaseStep):
 
         # hotspot params
         hotspot_str=self.settings.target_settings.target_hotspot_residues
+        not_binding_spec=adv.get('not_binding',None)
         epitope_range:str=adv.setdefault('epitope_range','full')
         epitope_strategy:str=adv.setdefault('epitope_strategy','none') 
+        binding_types=[]
+        if not_binding_spec not in (None,''):
+            not_binding_dict=_map_chain_residue_spec(
+                _load_chain_residue_spec(not_binding_spec),
+                id_map,
+                'not_binding',
+                )
+            for k,v in not_binding_dict.items():
+                if v == 'all':
+                    binding_types.append({'chain':{'id':k,'not_binding':'all'}})
+                else:
+                    binding_types.append({'chain':{'id':k,'not_binding':','.join(v)}})
         if hotspot_str:
             hotspots:List[Tuple[str,str]]=[(i[0],i[1:]) for i in hotspot_str.split(',')]
             hsp_dict={}
             for i in hotspots:
                 _=hsp_dict.setdefault(i[0],[])
                 _.append(id_map[i[0]][i[1]])
-            binding_types=[{'chain':{'id':k,'binding':','.join(v)}} for k,v in hsp_dict.items()]
+            # Keep binding entries after not_binding so explicit hotspot sites win on overlap.
+            binding_types.extend([{'chain':{'id':k,'binding':','.join(v)}} for k,v in hsp_dict.items()])
         else:
-            binding_types=[]
             assert epitope_range=='full', 'epitope-only strategy attempted without hotspots specified.'
 
         # binder params
@@ -246,7 +327,7 @@ class BolzGenSampler(BaseStep):
     @property
     def params_to_take(self):
         ret=[f'{self.name}-prefix','boltzdesign_stem','metrics_stem','boltzgen_env',
-             'epitope_range','epitope_strategy','cyclize_peptide',]
+             'epitope_range','epitope_strategy','cyclize_peptide','not_binding',]
         return tuple(ret)
             
         

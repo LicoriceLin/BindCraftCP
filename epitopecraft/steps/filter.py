@@ -34,11 +34,7 @@ class Filter(BaseStep):
         ret={}
         p=self.metrics_prefix
         for k,threshold in self.current_threshold.items():
-            val=input.get_metrics(k)
-            if val is not None:
-                ret[p+k]=_check_metric(val,threshold)
-            else:
-                ret[p+k]=False
+            ret[p+k]=_check_metric(input,k,threshold)
         ret[p+'sum']=all(ret.values())
         input.update_metrics(ret)
         return input
@@ -55,11 +51,56 @@ class Filter(BaseStep):
         return opt
         
 
-def _check_metric(val:bool|int|float,threshold:dict)->bool:
+def _check_metric(record:DesignRecord,metric_key:str,threshold:dict)->bool:
+    if isinstance(threshold,dict) and 'func' in threshold:
+        return _check_metric_custom(record,threshold)
+    val=record.get_metrics(metric_key)
+    if val is None:
+        return False
     if isinstance(val,bool):
         return val == threshold['higher']
     else:
         return threshold['higher'] == (val >= threshold['threshold'])
+
+
+def _check_metric_custom(record:DesignRecord,threshold:dict)->bool:
+    metric_spec=threshold.get('metrics',{})
+    metrics=_resolve_metric_spec(record,metric_spec)
+    if any(v is None for v in metrics.values()):
+        return False
+
+    env={
+        'metrics':metrics,
+        'value':next(iter(metrics.values())) if len(metrics)==1 else None,
+        'abs':abs,
+        'all':all,
+        'any':any,
+        'len':len,
+        'max':max,
+        'mean':_mean,
+        'min':min,
+        'sorted':sorted,
+        'sum':sum,
+        }
+    return bool(eval(threshold['func'],{"__builtins__":{}},env))
+
+
+def _resolve_metric_spec(record:DesignRecord,metric_spec:dict|list|str)->dict[str,Any]:
+    if isinstance(metric_spec,dict):
+        return {k:record.get_metrics(v) for k,v in metric_spec.items()}
+    elif isinstance(metric_spec,list):
+        return {f'm{i}':record.get_metrics(v) for i,v in enumerate(metric_spec)}
+    elif isinstance(metric_spec,str):
+        return {'value':record.get_metrics(metric_spec)}
+    else:
+        raise TypeError(f'unsupported metric_spec type: {type(metric_spec)}')
+
+
+def _mean(values)->float:
+    values=list(values)
+    if len(values)==0:
+        raise ValueError('mean() expects at least one value')
+    return sum(values)/len(values)
     
 
 

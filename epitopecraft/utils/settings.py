@@ -236,7 +236,7 @@ def flatten_threshold(d:Dict[str,Any], parent_key=''):
     items = {}
     for k, v in d.items():
         new_key = f"{parent_key}{NEST_SEP}{k}" if parent_key else str(k)
-        if isinstance(v, dict) and 'higher' not in v:
+        if isinstance(v, dict) and 'higher' not in v and 'func' not in v:
             items.update(flatten_threshold(v, new_key))
         else:
             items[new_key] = v

@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
+from time import perf_counter
 import pyrosetta as pr
 from pyrosetta.rosetta.core.kinematics import MoveMap
 from pyrosetta.rosetta.core.select.residue_selector import ChainSelector
@@ -14,8 +17,9 @@ from pyrosetta.rosetta.core.pose import correctly_add_cutpoint_variants
 import tempfile
 from .basestep import BaseStep,DesignBatch,DesignRecord,NEST_SEP
 from collections import OrderedDict
-from typing import Dict,Tuple
+from typing import Dict,Tuple,Optional
 from Bio.PDB import PDBParser,PDBIO
+from tqdm import tqdm
 from warnings import warn
 
 def init_pr(dalphaball_path:str):
@@ -107,6 +111,29 @@ def pr_relax(pdb_file:str, cyclize_peptide:bool=False,cyclize_chain:str='B')->st
             io.set_structure(relax_struct)
             io.save(f'{tdir}/relaxed.pdb')
         return open(f'{tdir}/relaxed.pdb','r').read()
+
+_worker_pr_initialized = False
+
+def _max_available_cpu_count()->int:
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+def _init_pr_worker(dalphaball_path:str):
+    global _worker_pr_initialized
+    if not _worker_pr_initialized:
+        init_pr(dalphaball_path)
+        _worker_pr_initialized = True
+
+def _relax_worker(record_id:str,pdb_file:str,cyclize_peptide:bool,
+        cyclize_chain:str)->Tuple[str,str,float]:
+    start=perf_counter()
+    pdb_str=pr_relax(
+        pdb_file,
+        cyclize_peptide=cyclize_peptide,
+        cyclize_chain=cyclize_chain)
+    return record_id,pdb_str,perf_counter()-start
     
 # def init_pr(dalphaball_path:str):
 #     pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {dalphaball_path} -corrections::beta_nov16 true -relax:default_repeats 1')
@@ -122,7 +149,9 @@ class Relax(BaseStep):
     
     @property
     def params_to_take(self)->Tuple[str,...]:
-        ret=[f'{self.name}-prefix', f'{self.name}-pdb-input', 'dalphaball_path','cyclize_peptide']
+        ret=[
+            f'{self.name}-prefix', f'{self.name}-pdb-input',
+            'dalphaball_path','cyclize_peptide','relax-threads']
         return tuple(ret)
     
     def init_pr(self):
@@ -141,6 +170,72 @@ class Relax(BaseStep):
                 input.pdb_files[self.pdb_to_take['pdb_key']],
                 cyclize_peptide=self.settings.adv.setdefault('cyclize_peptide',False),
                 cyclize_chain=self.pdb_to_take['binder_chain'])
+        return input
+
+    def process_batch(self,
+        input:DesignBatch,
+        pdb_purge_stem:Optional[str]=None,
+        pdb_to_take:Dict[str,str]|None=None,
+        metrics_prefix:str|None=None,
+        n_threads:int|None=None,
+        )->DesignBatch:
+        if pdb_purge_stem is not None:
+            self.config_pdb_purge(pdb_purge_stem)
+        if metrics_prefix is not None:
+            self.config_metrics_prefix(metrics_prefix)
+        if pdb_to_take is not None:
+            self.config_pdb_input_key(pdb_to_take)
+
+        if n_threads is None:
+            n_threads=self.settings.adv.setdefault(
+                'relax-threads',_max_available_cpu_count())
+        n_threads=max(1,int(n_threads))
+
+        todo=[
+            (record_id,record)
+            for record_id,record in input.records.items()
+            if input.overwrite or not self.check_processed(record)
+        ]
+        if not todo:
+            return input
+        if n_threads == 1:
+            for record_id,record in tqdm(todo,desc=self.name):
+                self.process_record(record)
+                self.purge_record(record)
+                input.save_record(record_id)
+            return input
+
+        pdb_key=self.pdb_to_take['pdb_key']
+        cyclize_peptide=self.settings.adv.setdefault('cyclize_peptide',False)
+        cyclize_chain=self.pdb_to_take['binder_chain']
+        pdb_to_add=self.pdb_to_add[0]
+        time_key=f'time{NEST_SEP}{self.metrics_prefix.strip(NEST_SEP)}'
+        dalphaball_path=self.settings.adv.setdefault(
+            'dalphaball_path','epitopecraft/steps/DAlphaBall.gcc')
+        max_workers=min(n_threads,len(todo))
+
+        with ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=get_context('spawn'),
+            initializer=_init_pr_worker,
+            initargs=(dalphaball_path,),
+        ) as executor:
+            futures=[
+                executor.submit(
+                    _relax_worker,
+                    record_id,
+                    record.pdb_files[pdb_key],
+                    cyclize_peptide,
+                    cyclize_chain)
+                for record_id,record in todo
+            ]
+            for future in tqdm(as_completed(futures),total=len(futures),desc=self.name):
+                record_id,pdb_str,elapsed=future.result()
+                record=input.records[record_id]
+                record.pdb_strs[pdb_to_add]=pdb_str
+                record.set_metrics(time_key,elapsed)
+                self.purge_record(record)
+                input.save_record(record_id)
         return input
     
     @property

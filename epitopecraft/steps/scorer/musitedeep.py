@@ -145,7 +145,7 @@ class AnnotPTM(BaseScorer):
     
     def process_batch(self, input:DesignBatch, **kwargs):
         self.config_params(**kwargs)
-        sub_batch=input.filter(lambda i: not self.check_processed(i))
+        sub_batch=input if input.overwrite else input.filter(lambda i: not self.check_processed(i))
         tqdm.tqdm.write(f'annotating {self.params["ptm_type"]}')
         if len(sub_batch)>0:
             self.score_func(sub_batch)

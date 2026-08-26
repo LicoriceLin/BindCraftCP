@@ -30,18 +30,27 @@ class AnnotRMSD(BaseScorer):
     default selection of chains:
         mobile from refold, so A+B
         target from template, so ts.full_target_chain+ts.new_binder_chain
+        target from hallucination, so A+ts.full_binder_chain
+        binder RMSD is measured on CA atoms only so sequence changes do not
+        create mismatched side-chain atom sets.
     '''
     def __init__(self, settings:GlobalSettings):
         super().__init__(settings,score_func=annot_rmsd)
 
     def _init_params(self):
         ts=self.settings.target_settings
+        if self.settings.adv.get('templated', False):
+            target_chain=ts.full_target_chain
+            target_binder_chain=ts.new_binder_chain
+        else:
+            target_chain='A'
+            target_binder_chain=ts.full_binder_chain
         self.params=dict(
             pdb_to_take=self.pdb_to_take,
             mobile_sel='chain A',
-            mobile_rms_sel=f'chain {ts.full_binder_chain}' , 
-            target_sel=f'chain {ts.full_target_chain}',
-            target_rms_sel=f'chain {ts.new_binder_chain}',
+            mobile_rms_sel=f'chain {ts.full_binder_chain} and name CA',
+            target_sel=f'chain {target_chain}',
+            target_rms_sel=f'chain {target_binder_chain} and name CA',
             metrics_prefix=self.metrics_prefix
             )
 

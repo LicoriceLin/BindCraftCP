@@ -288,7 +288,18 @@ def partial_align(mobile:str,mobile_sel:str,target:str,
     cmd.align(f'{mobile} and ({mobile_sel})',f'{mobile}-aln')
     cmd.delete(f'{mobile}-aln')
     cmd.delete(f'{target}-aln')
-    ret2=cmd.align(f'{mobile} and ({mobile_rms_sel})',f'{target} and ({target_rms_sel})' ,cycles=0,transform=0)[0]
+    mobile_coords=cmd.get_coords(f'{mobile} and ({mobile_rms_sel}) and not element H')
+    target_coords=cmd.get_coords(f'{target} and ({target_rms_sel}) and not element H')
+    if mobile_coords is None or target_coords is None:
+        raise ValueError(
+            f'failed to fetch coords for obj_rmsd: '
+            f'mobile=`{mobile_rms_sel}` target=`{target_rms_sel}`')
+    if mobile_coords.shape != target_coords.shape:
+        raise ValueError(
+            f'mismatched coords for obj_rmsd after target alignment: '
+            f'mobile={mobile_coords.shape} target={target_coords.shape} '
+            f'mobile_sel=`{mobile_rms_sel}` target_sel=`{target_rms_sel}`')
+    ret2=float(np.sqrt(np.mean(np.sum((mobile_coords-target_coords)**2,axis=1))))
     return {'align_rmsd':ret1[0],'obj_rmsd':ret2}
 
 def partial_align_noobj(mobile:str,mobile_sel:str,target:str,target_sel:str|None=None):
