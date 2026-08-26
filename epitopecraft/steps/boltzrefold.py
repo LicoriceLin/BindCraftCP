@@ -69,7 +69,7 @@ ANALYSIS_SUMMARY_KEYS = (
 class BoltzRefold(BaseStep):
     """BoltzGen partial-target protein binder co-fold step.
 
-    The heavy lifting is delegated to boltzgen_peptide_refold_score.py so this
+    The heavy lifting is delegated to the repository-owned BoltzGen CLI so this
     Step uses the same target residue, binding residue, structure group, and MSA
     preparation logic as the standalone BoltzGen refold workflow.
     """
@@ -136,7 +136,12 @@ class BoltzRefold(BaseStep):
         adv = self.settings.adv
         adv.setdefault(
             f"{self.name}-script",
-            "/hpf/projects/mkoziarski/zdeng/boltzgen/boltzgen_peptide_refold_score.py",
+            str(
+                Path(__file__).parents[1]
+                / "backends"
+                / "boltzgen"
+                / "peptide_refold_cli.py"
+            ),
         )
         adv.setdefault(f"{self.name}-env", "boltzgen")
         adv.setdefault(f"{self.name}-output-stem", "boltzrefold")

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "epitopecraft"
+version = "0.2.0.dev0"
+description = "Composable protein and ligand design workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+dependencies = [
+  "click",
+  "PyYAML",
+]
+
+[project.optional-dependencies]
+analysis = ["biopython"]
+test = ["biopython", "numpy", "pytest>=8"]
+
+[project.scripts]
+epitopecraft = "epitopecraft.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["epitopecraft*"]
+
+[tool.setuptools.package-data]
+epitopecraft = [
+  "pipelines/config/*.json",
+  "pipelines/config/*.yaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "gpu: workflow test that exercises a real GPU backend",
+]

@@ -1,73 +1,127 @@
 # EpitopeCraft
-![alt text](pipeline.png)
 
-[BindCraft](https://github.com/martinpacesa/BindCraft) variant with higher efficiency. Tailored for Huge Targets.
+EpitopeCraft is a composable framework for epitope-focused protein design,
+refolding, sequence redesign, structure analysis, and protein/small-molecule
+screening. It grew from BindCraft and is being reorganized around explicit Step
+configuration, typed artifacts, canonical residue coordinates, and readable
+pipeline definitions.
 
-[Preprint URL](https://arxiv.org/abs/2509.25479)
+Preprint: [arXiv:2509.25479](https://arxiv.org/abs/2509.25479)
 
-STILL UNDER CONSTRUCTION! Stable version to be released soon.
+> The `refactor/core-v2` branch is an active API-breaking refactor. The legacy
+> HalluDesign command remains available while individual backends move to the
+> new contracts. See [MIGRATION.md](MIGRATION.md).
 
+## Core model
+
+- Every Step declares its own dataclass configuration and typed input/output
+  ports. The Step instance id scopes config, metrics, cache, and provenance.
+- `StructureArtifact` maps backend-local chain/residue ids to an immutable
+  design reference. Complete target author numbering is preferred over local
+  epitope numbering; binders receive a non-conflicting canonical entity.
+- Python describes the data flow. YAML contains behavior parameters. Filters
+  expose `passed` and `rejected` branches so expensive downstream work only
+  sees selected designs.
+- `PipelineRunner` owns run directories, manifests, and instance-scoped resume
+  caches.
+
+```python
+pipeline = Pipeline(
+    "screen",
+    inputs={
+        "target": StructureArtifact,
+        "site": SelectionArtifact,
+        "candidates": tuple,
+    },
+    config=PipelineConfig.from_file("screen.yaml"),
+)
+screened = pipeline.add(
+    Boltz2Screen("screen"),
+    target=pipeline.inputs.target,
+    site=pipeline.inputs.site,
+    candidates=pipeline.inputs.candidates,
+)
+pipeline.output("designs", screened.designs)
+```
+
+The same downstream contracts can be used by ColabDesign, BoltzGen,
+RFDiffusion, another refold backend, OpenMM MD, or MMPBSA without adding backend
+branches to the Runner.
 
 ## Installation
-set-up BindCraft virtual env:
-`bash install_bindcraft.sh --cuda '12.4' --pkg_manager 'conda'`
 
-Optional:
-  set-up [MusiteDeep](https://github.com/duolinwang/MusiteDeep) 
-  for post-translational modification metrics.
+The lightweight core requires Python 3.10 or newer:
 
-  set-up virtual env for [esm_if](https://github.com/KULL-Centre/_2024_cagiada_stability/blob/main/stab_ESM_IF.ipynb)
-  for extra stability metrics
+```bash
+python -m pip install -e '.[test]'
+```
 
-## Quick start
-`python -m epitopecraft.main standard-design --target-settings TARGET_SETTING --binder-settings BINER_SETTINGS --advanced-settings ADV_SETTINGS --filter-settings FILTER_SETTING` 
+Modeling backends intentionally remain optional because they require different
+CUDA and scientific environments. On the development cluster:
 
-The `epitopecraft/main.py` entry point launches the `HalluDesign` pipeline, which wires
-`Hallucinate → Filter → (optional) Graft → Refold → Annotate/Relax → MPNN → final scoring`.
-Each step consumes specific parts of the four settings blocks below, so verify these inputs before
-launching large jobs.
+- ColabDesign, ProteinMPNN, AF2, PyRosetta: `BindCraft`
+- BoltzGen/Boltz2 co-fold runtime: `boltzgen`
+- Boltz-2 structure and affinity screening: `binding_affinity`
 
-See `epitopecraft/test/` and `epitopecraft/pipelines/config` for demo settings. 
+Backend imports are lazy, so config, artifact, cache, and pipeline tooling work
+without loading those environments.
 
-See `epitopecraft/utils/settings.py` for relevant codes. 
+## CLI
 
-Design results will be saved in `design_path` of  `BinderSettings`. Design metrics is easy to analyse with API in `epitopecraft.utils.design_record`.
+```bash
+# Inspect a project-defined core-v2 Pipeline without loading a model.
+epitopecraft pipeline describe myproject.workflow:build --config run.yaml
+epitopecraft pipeline describe myproject.workflow:build --schema
+epitopecraft pipeline plan myproject.workflow:build --config run.yaml
 
+# Repository-owned BoltzGen protein/peptide co-folding runtime.
+epitopecraft refold boltzgen --help
 
-### TargetSettings (`epitopecraft/utils/settings.py:39`)
-- `starting_pdb`: trimmed target that Hallucinate and Refold load.
-- `chains`: comma-separated chains exposed to the binder; other chains are dropped up front.
-- `target_hotspot_residues`: optional residue ranges that keep Hallucinate focused on a patch.
-- `full_target_pdb`/`full_target_chain`: intact target used when the templated `Graft` step runs.
-- `full_binder_chain` & auto-derived `new_binder_chain`: ensure binder chain IDs never clash with
-  target chains so that Graft/MPNN receive the correct binder/target chain mapping.
+# Curated legacy utilities, now with one package implementation.
+epitopecraft inspect animation --help
+epitopecraft refold repair-missing --help
+epitopecraft redesign mpnn-one --help
 
-### BinderSettings (`epitopecraft/utils/settings.py:63`)
-- `design_path`: root folder where `BasePipeline` saves Hallucinate, Refold, Relax, and MPNN logs.
-- `binder_name`: prefix used by every step when naming batch folders, CSV summaries, and PDBs.
-- `binder_lengths`: lengths sampled by Hallucinate/MPNN when generating binder backbones.
-- `random_seeds`: per-trajectory seeds; diversify to explore more hallucination trajectories.
-- `helix_values` (optional): overrides helix bias before Hallucinate/MPNN run.
-- `global_seed`: fallback RNG seed for any stage lacking an explicit seed.
+# Legacy standard workflow during migration.
+epitopecraft standard-design --help
+```
 
-### AdvancedSettings
-See `epitopecraft/pipelines/config/base_advanced_settings.yaml` for keys and helps in the demo quick start.
+## Recipes
 
-### FilterSettings
-- `filters_path`: JSON bundle describing `thresholds` and `recipes` consumed by the `Filter` step.
-- Inline `thresholds`/`recipes`: merged on top of the file to let you tweak values quickly.
-- Recipes named `after:hallucinate` and `after:refold` are referenced directly in HalluDesign, so
-  ensure they exist (or update the pipeline if you rename them). Each recipe should contain the
-  flattened thresholds needed at that checkpoint (see `FilterSettings.recipe_threshold`).
+Filter and ProteinMPNN recipes retain nested boolean logic, arithmetic,
+residue selectors, and overlapping amino-acid biases. Expressions are parsed by
+a restricted AST evaluator rather than raw `eval`. Scientific logic that
+cannot be represented in YAML can use an explicitly enabled, registered Python
+hook.
 
-Note: prefix of key values is configurable in `AdvancedSettings`. Make sure the key in `FilterSettings` exists in `Pipeline.metrics_to_add` 
+Current compatibility fixtures include:
 
+- `epitopecraft/pipelines/config/default_filter.yaml`
+- `epitopecraft/pipelines/config/mpnn-sat-n-charge.json`
+- `epitopecraft/pipelines/config/mpnn-rmC-recipe.json`
 
-## Build your own design pipeline with `Step`s
-See `epitopecraft/steps/` for independent design/score steps.
-Steps are initialized by `GlobalSettings` and called by `Step.process_record` and `Step.process_batch` methods. 
-Call `Step.{pdb,params}_to_take` to see input keys.
-Call `Step.{metrics,pdb,track}_to_add` to see outputs keys.
+## Testing
 
-## Acknowledgement 
-TBD
+Run tests on an interactive compute allocation:
+
+```bash
+conda activate BindCraft
+python -m pytest
+```
+
+Contract tests are lightweight. GPU workflow tests run by default when the
+required GPU and conda environment are available. They currently exercise real
+ProteinMPNN cysteine redesign, BoltzGen/Boltz2 protein co-folding, and Boltz-2
+known-site small-molecule structure plus affinity prediction.
+
+## Developer documentation
+
+- [Core architecture](docs/architecture/core-v2.md)
+- [Step contract](docs/architecture/step-contract.md)
+- [Artifact and residue mapping](docs/architecture/artifact-model.md)
+- [Pipeline authoring](docs/architecture/pipeline-authoring.md)
+- [CATH BoltzGen site-discovery experiment](experiments/cath_site_discovery/README.md)
+
+## License
+
+See [LICENSE](LICENSE).
