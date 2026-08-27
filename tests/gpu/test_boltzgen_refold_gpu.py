@@ -11,7 +11,7 @@ from epitopecraft.core.design import Design, DesignSet, ProteinCandidate
 from epitopecraft.core.pipeline import Pipeline, PipelineRunner
 
 
-def _require_boltzgen_gpu():
+def _require_boltzgen_gpu() -> None:
     if shutil.which("nvidia-smi") is None:
         pytest.skip("No NVIDIA runtime is visible")
     gpu = subprocess.run(
@@ -33,7 +33,7 @@ def _require_boltzgen_gpu():
 
 
 @pytest.mark.gpu
-def test_real_boltzgen_refold_maps_renamed_cif_chains(tmp_path):
+def test_real_boltzgen_refold_maps_renamed_cif_chains(tmp_path: Path) -> None:
     """Run one short Boltz2 co-fold through the public Pipeline Step."""
 
     _require_boltzgen_gpu()

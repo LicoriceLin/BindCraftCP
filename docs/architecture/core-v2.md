@@ -11,7 +11,8 @@ The architecture has three boundaries:
 3. A `Pipeline` describes a DAG; `PipelineRunner` owns execution, resume cache,
    run directories, and manifests.
 
-Backend packages may import heavy modeling libraries. Core modules must not.
+Backend packages may import heavy modeling libraries. Core modules must not,
+apart from the required Gemmi coordinate model used by `StructureArtifact`.
 Adding a design, refold, MD, or scoring implementation should require a new
 Step with compatible ports, not an edit to a central enum or runner branch.
 

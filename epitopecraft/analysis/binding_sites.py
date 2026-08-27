@@ -5,10 +5,9 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from dataclasses import dataclass
-from io import StringIO
 from math import dist
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
 from ..core.artifacts import (
     CanonicalResidueId,
@@ -63,7 +62,11 @@ class BindingSiteDiscovery(Step):
         "table": PortSpec(TableArtifact),
     }
 
-    def execute(self, inputs, context):
+    def execute(
+        self,
+        inputs: Mapping[str, Any],
+        context: Any,
+    ) -> Mapping[str, Any]:
         """Aggregate mapped contacts into ranked canonical binding-site patches."""
         target: StructureArtifact = inputs["target"]
         designs: DesignSet = inputs["designs"]
@@ -172,62 +175,30 @@ class BindingSiteDiscovery(Step):
 
 
 def _atoms(artifact: StructureArtifact) -> tuple[_Atom, ...]:
-    if artifact.structure_format in {"pdb", "ent"}:
-        atoms = []
-        for line in artifact.read_text().splitlines():
-            if line[:6].strip() not in {"ATOM", "HETATM"} or len(line) < 54:
-                continue
-            try:
-                coordinate = (
-                    float(line[30:38]),
-                    float(line[38:46]),
-                    float(line[46:54]),
-                )
-                residue = LocalResidueId(
-                    line[21].strip() or "_",
-                    int(line[22:26]),
-                    line[26].strip(),
-                )
-            except ValueError:
-                continue
-            element = line[76:78].strip() if len(line) >= 78 else line[12:16].strip()[:1]
-            atoms.append(
-                _Atom(
-                    residue=residue,
-                    name=line[12:16].strip(),
-                    coordinate=coordinate,
-                    element=element.upper(),
-                )
+    """Read atoms from the Artifact's selected live Gemmi model."""
+
+    structure = artifact.load_structure()
+    if artifact.model_index < 0 or artifact.model_index >= len(structure):
+        raise ValueError(
+            f"Model index {artifact.model_index} is outside {artifact.id}"
+        )
+    atoms: list[_Atom] = []
+    for chain in structure[artifact.model_index]:
+        for residue in chain:
+            local = LocalResidueId(
+                chain.name or "_",
+                residue.seqid.num,
+                residue.seqid.icode.strip(),
             )
-        return tuple(atoms)
-    if artifact.structure_format not in {"cif", "mmcif"}:
-        raise ValueError(f"Unsupported structure format: {artifact.structure_format}")
-    try:
-        from Bio.PDB import MMCIFParser
-    except ImportError as error:
-        raise RuntimeError("BioPython is required for mmCIF contact analysis") from error
-    parser = MMCIFParser(QUIET=True, auth_chains=True, auth_residues=True)
-    source = str(artifact.path) if artifact.path is not None else StringIO(artifact.read_text())
-    structure = parser.get_structure(artifact.id, source)
-    atoms = []
-    for model in structure:
-        for chain in model:
-            for residue in chain:
-                local = LocalResidueId(
-                    str(chain.id),
-                    int(residue.id[1]),
-                    str(residue.id[2]).strip(),
-                )
-                for atom in residue:
-                    atoms.append(
-                        _Atom(
-                            residue=local,
-                            name=str(atom.name),
-                            coordinate=tuple(float(value) for value in atom.coord),
-                            element=str(atom.element).upper(),
-                        )
+            for atom in residue:
+                atoms.append(
+                    _Atom(
+                        residue=local,
+                        name=atom.name,
+                        coordinate=(atom.pos.x, atom.pos.y, atom.pos.z),
+                        element=atom.element.name.upper(),
                     )
-        break
+                )
     return tuple(atoms)
 
 

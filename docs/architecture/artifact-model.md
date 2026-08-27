@@ -2,7 +2,7 @@
 
 Artifacts are backend-neutral values passed between Steps:
 
-- `StructureArtifact` stores raw PDB/mmCIF and a `ResidueMap`.
+- `StructureArtifact` owns a live mutable `gemmi.Structure` and a `ResidueMap`.
 - `SequenceArtifact` names a canonical protein entity.
 - `LigandArtifact` stores a small molecule without pretending it is a protein.
 - `SelectionArtifact` stores canonical residue positions.
@@ -23,7 +23,18 @@ building residue correspondences. This covers HalluDesign A/B renumbering,
 grafting a local epitope into a complete target, and BoltzGen renaming B/Z to
 A/B during refolding.
 
+Residue maps cover polymer residues only. Ligands remain explicit candidates
+or entities instead of receiving synthetic protein residue identities.
+
+Gemmi is the sole core parser/writer for PDB and mmCIF. `from_text()` and
+`from_file()` parse eagerly, while `from_structure()` wraps an existing Gemmi
+object without copying it. `artifact.structure` and `load_structure()` expose
+the same mutable object, so Steps may edit chains, residues, atoms, and
+coordinates in place. `read_text()`, `export()`, runner fingerprints, and
+pickle resume caches all observe the current object rather than the original
+source file.
+
 Use `summary()`, `validate()`, `export(numbering="reference")`, and
 `write_debug_bundle()` when diagnosing a mapping. The debug bundle contains the
-raw structure, canonicalized structure when supported, `residue_map.tsv`,
+current local-numbered structure, canonicalized structure, `residue_map.tsv`,
 `entities.yaml`, validation results, and provenance.

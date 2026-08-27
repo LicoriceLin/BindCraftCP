@@ -16,7 +16,7 @@ from epitopecraft.core.design import SmallMoleculeCandidate
 from epitopecraft.core.pipeline import Pipeline, PipelineRunner
 
 
-def _require_boltz2_gpu():
+def _require_boltz2_gpu() -> None:
     if shutil.which("nvidia-smi") is None:
         pytest.skip("No NVIDIA runtime is visible")
     gpu = subprocess.run(
@@ -35,7 +35,7 @@ def _require_boltz2_gpu():
 
 
 @pytest.mark.gpu
-def test_real_boltz2_known_site_small_molecule_screen(tmp_path):
+def test_real_boltz2_known_site_small_molecule_screen(tmp_path: Path) -> None:
     _require_boltz2_gpu()
     target_path = Path("epitopecraft/test/targets/WDR5-seg_6.pdb").resolve()
     target = StructureArtifact.from_file("wdr5_segment", target_path)
@@ -93,4 +93,6 @@ def test_real_boltz2_known_site_small_molecule_screen(tmp_path):
     assert "affinity" in design.metrics["screen"]
     mapping = design.artifacts["screen.structure"].residue_map.summary()
     assert mapping["exact"] == 127
-    assert mapping["unmapped_chain"] >= 1
+    # ResidueMap tracks polymers. The ligand remains a candidate/entity rather
+    # than being represented as a fake, unmapped protein residue.
+    assert mapping.get("unmapped_chain", 0) == 0

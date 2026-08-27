@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -46,7 +45,7 @@ class ProteinMPNN(Step):
     output_ports = {"designs": PortSpec(DesignSet)}
 
     @property
-    def model(self):
+    def model(self) -> Any:
         """Lazily construct the heavy ColabDesign model in the backend environment."""
 
         if getattr(self, "_model", None) is None:
@@ -60,7 +59,11 @@ class ProteinMPNN(Step):
             )
         return self._model
 
-    def execute(self, inputs, context):
+    def execute(
+        self,
+        inputs: Mapping[str, Any],
+        context: Any,
+    ) -> Mapping[str, Any]:
         """Sample recipe-constrained sequences and return derived designs."""
         designs: DesignSet = inputs["designs"]
         recipes = PenaltyRecipeBook.from_file(self.config.recipe_path)
@@ -156,31 +159,21 @@ class ProteinMPNN(Step):
             by_entity[self.config.binder_entity_id],
         )
 
-    def _pdb_path(self, artifact: StructureArtifact, design_id: str, context) -> Path:
-        if artifact.structure_format in {"pdb", "ent"}:
-            if artifact.path is not None and artifact.path.exists():
-                return artifact.path.resolve()
-            step_dir = context.step_dir(self.id)
-            if step_dir is None:
-                raise RuntimeError("In-memory structures require PipelineRunner(run_dir=...)")
-            return artifact.export(step_dir / f"{design_id}.pdb")
-        if artifact.structure_format not in {"cif", "mmcif"}:
-            raise ValueError(f"ProteinMPNN cannot read {artifact.structure_format!r}")
+    def _pdb_path(
+        self,
+        artifact: StructureArtifact,
+        design_id: str,
+        context: Any,
+    ) -> Path:
+        """Materialize the current structure as ProteinMPNN-compatible PDB."""
+
         step_dir = context.step_dir(self.id)
         if step_dir is None:
-            raise RuntimeError("CIF conversion requires PipelineRunner(run_dir=...)")
-        try:
-            from Bio.PDB import MMCIFParser, PDBIO
-        except ImportError as error:
-            raise RuntimeError("BioPython is required to convert mmCIF for ProteinMPNN") from error
-        parser = MMCIFParser(QUIET=True, auth_chains=True, auth_residues=True)
-        source = str(artifact.path) if artifact.path is not None else StringIO(artifact.read_text())
-        structure = parser.get_structure(artifact.id, source)
-        destination = step_dir / f"{design_id}.pdb"
-        writer = PDBIO()
-        writer.set_structure(structure)
-        writer.save(str(destination))
-        return destination
+            raise RuntimeError("ProteinMPNN requires PipelineRunner(run_dir=...)")
+        return artifact.export(
+            step_dir / f"{design_id}.pdb",
+            structure_format="pdb",
+        )
 
     def _install_bias(self, bias: tuple[tuple[float, ...], ...], length: int) -> None:
         import numpy as np

@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from string import ascii_uppercase
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -206,7 +206,11 @@ class Boltz2Screen(Step):
     }
     output_ports = {"designs": PortSpec(DesignSet)}
 
-    def execute(self, inputs, context):
+    def execute(
+        self,
+        inputs: Mapping[str, Any],
+        context: Any,
+    ) -> Mapping[str, Any]:
         """Run one Boltz-2 batch and attach mapped structures and scores."""
         target: StructureArtifact = inputs["target"]
         site: SelectionArtifact = inputs["site"]
@@ -269,6 +273,8 @@ class Boltz2Screen(Step):
         reference: ReferenceModel,
         step_dir: Path,
     ) -> Path:
+        """Export the Artifact's current coordinates for the Boltz process."""
+
         if self.config.use_target_template and target.structure_format in {"pdb", "ent"}:
             chain_entities = {
                 entity.chain_id: entity_id
@@ -280,10 +286,9 @@ class Boltz2Screen(Step):
                 step_dir / "target.canonical.pdb",
                 numbering="canonical",
             ).resolve()
-        if target.path is not None and target.path.exists():
-            return target.path.resolve()
-        suffix = "pdb" if target.structure_format == "ent" else target.structure_format
-        return target.export(step_dir / f"target.{suffix}").resolve()
+        return target.export(
+            step_dir / f"target.{target.structure_format}",
+        ).resolve()
 
     def _read_case(
         self,

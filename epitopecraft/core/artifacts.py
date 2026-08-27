@@ -8,32 +8,8 @@ from pathlib import Path
 from string import ascii_uppercase
 from typing import Any, Iterable, Iterator, Mapping
 
+import gemmi
 import yaml
-
-
-AA3_TO_1 = {
-    "ALA": "A",
-    "ARG": "R",
-    "ASN": "N",
-    "ASP": "D",
-    "CYS": "C",
-    "GLN": "Q",
-    "GLU": "E",
-    "GLY": "G",
-    "HIS": "H",
-    "ILE": "I",
-    "LEU": "L",
-    "LYS": "K",
-    "MET": "M",
-    "PHE": "F",
-    "PRO": "P",
-    "SER": "S",
-    "THR": "T",
-    "TRP": "W",
-    "TYR": "Y",
-    "VAL": "V",
-    "MSE": "M",
-}
 
 
 class ArtifactError(ValueError):
@@ -161,7 +137,7 @@ class SelectionArtifact(Artifact):
 
 @dataclass(frozen=True)
 class ParsedResidue:
-    """A unique polymer residue parsed from a PDB artifact."""
+    """A unique polymer residue read from one coordinate model."""
 
     local_id: LocalResidueId
     residue_name: str
@@ -208,7 +184,7 @@ class ResidueMapEntry:
 class ResidueMap:
     """Bidirectional residue correspondence for one StructureArtifact."""
 
-    def __init__(self, entries: Iterable[ResidueMapEntry] = ()):
+    def __init__(self, entries: Iterable[ResidueMapEntry] = ()) -> None:
         self.entries = tuple(entries)
         self._by_local = {entry.local_id: entry for entry in self.entries}
         if len(self._by_local) != len(self.entries):
@@ -260,14 +236,15 @@ class DebugBundle:
     provenance: Path
 
 
-@dataclass(frozen=True)
+@dataclass
 class StructureArtifact(Artifact):
-    """A structure plus its coordinate mapping and transformation provenance."""
+    """A mutable Gemmi structure plus mapping and transformation provenance."""
 
     id: str
     structure_format: str
-    text: str | None = field(default=None, repr=False)
+    structure: gemmi.Structure = field(repr=False)
     path: Path | None = None
+    model_index: int = 0
     residue_map: ResidueMap = field(default_factory=ResidueMap, repr=False)
     reference: "ReferenceModel | None" = field(default=None, repr=False)
     provenance: Mapping[str, Any] = field(default_factory=dict)
@@ -279,14 +256,17 @@ class StructureArtifact(Artifact):
         text: str,
         *,
         structure_format: str = "pdb",
+        model_index: int = 0,
         provenance: Mapping[str, Any] | None = None,
     ) -> "StructureArtifact":
         """Create an in-memory structure artifact."""
 
+        normalized_format = _normalize_structure_format(structure_format)
         return cls(
             id=artifact_id,
-            structure_format=structure_format.lower(),
-            text=text,
+            structure_format=normalized_format,
+            structure=_parse_structure_text(artifact_id, text, normalized_format),
+            model_index=model_index,
             provenance=dict(provenance or {}),
         )
 
@@ -297,46 +277,75 @@ class StructureArtifact(Artifact):
         path: str | Path,
         *,
         structure_format: str | None = None,
+        model_index: int = 0,
         provenance: Mapping[str, Any] | None = None,
     ) -> "StructureArtifact":
-        """Create a lazily loaded artifact from a PDB or CIF path."""
+        """Parse a PDB or mmCIF path into an in-memory Gemmi structure."""
 
         resolved = Path(path)
+        normalized_format = _normalize_structure_format(
+            structure_format or _format_from_path(resolved)
+        )
         return cls(
             id=artifact_id,
-            structure_format=(structure_format or resolved.suffix.lstrip(".")).lower(),
+            structure_format=normalized_format,
+            structure=_parse_structure_path(artifact_id, resolved, normalized_format),
             path=resolved,
+            model_index=model_index,
+            provenance=dict(provenance or {}),
+        )
+
+    @classmethod
+    def from_structure(
+        cls,
+        artifact_id: str,
+        structure: gemmi.Structure,
+        *,
+        structure_format: str = "cif",
+        path: str | Path | None = None,
+        model_index: int = 0,
+        provenance: Mapping[str, Any] | None = None,
+    ) -> "StructureArtifact":
+        """Wrap a live Gemmi object without copying it."""
+
+        return cls(
+            id=artifact_id,
+            structure_format=_normalize_structure_format(structure_format),
+            structure=_prepare_structure(artifact_id, structure),
+            path=Path(path) if path is not None else None,
+            model_index=model_index,
             provenance=dict(provenance or {}),
         )
 
     def read_text(self) -> str:
-        """Return structure text from memory or its source path."""
+        """Serialize the current mutable structure in its declared format."""
 
-        if self.text is not None:
-            return self.text
-        if self.path is None:
-            raise ArtifactError(f"Artifact {self.id} has neither text nor path")
-        return self.path.read_text()
+        return _serialize_structure(self.structure, self.structure_format)
+
+    def load_structure(self) -> gemmi.Structure:
+        """Return the live mutable Gemmi object held by this artifact."""
+
+        return self.structure
 
     def residues(self) -> tuple[ParsedResidue, ...]:
         """Parse unique polymer residues in file order."""
 
-        if self.structure_format in {"pdb", "ent"}:
-            return tuple(_parse_pdb_residues(self.read_text()))
-        if self.structure_format in {"cif", "mmcif"}:
-            return tuple(_parse_mmcif_residues(self))
-        raise ArtifactError(f"Unsupported structure format: {self.structure_format!r}")
+        structure = self.load_structure()
+        return tuple(_iter_polymer_residues(structure, self.model_index))
 
     def summary(self) -> dict[str, Any]:
         """Return a compact printable description for interactive debugging."""
 
-        residues = self.residues()
+        structure = self.load_structure()
+        residues = tuple(_iter_polymer_residues(structure, self.model_index))
         return {
             "id": self.id,
             "format": self.structure_format,
             "path": str(self.path) if self.path else None,
             "chains": sorted({item.local_id.chain_id for item in residues}),
             "residues": len(residues),
+            "models": len(structure),
+            "model_index": self.model_index,
             "mapping": self.residue_map.summary(),
             "provenance": dict(self.provenance),
         }
@@ -347,24 +356,38 @@ class StructureArtifact(Artifact):
         issues = self.residue_map.validate()
         if not self.read_text().strip():
             issues.append("Structure text is empty")
+            return issues
+        try:
+            structure = self.load_structure()
+            _model_at(structure, self.model_index)
+        except ArtifactError as error:
+            issues.append(str(error))
         return issues
 
-    def export(self, path: str | Path, *, numbering: str = "raw") -> Path:
-        """Write raw, author-reference, or contiguous canonical PDB numbering."""
+    def export(
+        self,
+        path: str | Path,
+        *,
+        numbering: str = "raw",
+        structure_format: str | None = None,
+    ) -> Path:
+        """Write current, author-reference, or canonical coordinates."""
 
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        output_format = _normalize_structure_format(
+            structure_format or _format_from_path(destination)
+        )
         if numbering == "raw":
-            output = self.read_text()
+            output = _serialize_structure(self.structure, output_format)
         elif numbering in {"reference", "canonical"}:
             if self.reference is None:
                 raise ArtifactError("Reference-numbered export requires a ReferenceModel")
-            if self.structure_format not in {"pdb", "ent"}:
-                raise ArtifactError("Reference-numbered export currently requires PDB input")
-            output = _rewrite_pdb_numbering(
-                self.read_text(),
+            output = _rewrite_structure_numbering(
+                self.load_structure(),
                 self.residue_map,
                 self.reference,
+                structure_format=output_format,
                 canonical=numbering == "canonical",
             )
         else:
@@ -380,7 +403,7 @@ class StructureArtifact(Artifact):
         suffix = "pdb" if self.structure_format == "ent" else self.structure_format
         raw = self.export(target / f"raw.{suffix}")
         canonical = target / f"canonicalized.{suffix}"
-        if self.reference is not None and self.structure_format in {"pdb", "ent"}:
+        if self.reference is not None:
             self.export(canonical, numbering="reference")
         else:
             canonical.write_text(self.read_text())
@@ -434,7 +457,7 @@ class ReferenceModel:
         *,
         source_artifact_id: str | None = None,
         source_preference: str | None = None,
-    ):
+    ) -> None:
         self.entities = dict(entities or {})
         self.source_artifact_id = source_artifact_id
         self.source_preference = source_preference
@@ -735,168 +758,224 @@ class ReferenceModel:
         }
 
 
-def _parse_pdb_residues(text: str) -> Iterator[ParsedResidue]:
-    seen: set[LocalResidueId] = set()
-    for line in text.splitlines():
-        if line[:6].strip() not in {"ATOM", "HETATM"} or len(line) < 27:
-            continue
-        chain_id = line[21].strip() or "_"
-        try:
-            sequence_id = int(line[22:26])
-        except ValueError as error:
-            raise ArtifactError(f"Invalid PDB residue number in line: {line}") from error
-        local_id = LocalResidueId(chain_id, sequence_id, line[26].strip())
-        if local_id in seen:
-            continue
-        seen.add(local_id)
-        residue_name = line[17:20].strip().upper()
-        yield ParsedResidue(
-            local_id=local_id,
-            residue_name=residue_name,
-            one_letter=AA3_TO_1.get(residue_name, "X"),
-        )
+def _normalize_structure_format(structure_format: str) -> str:
+    """Normalize supported coordinate format aliases."""
+
+    normalized = structure_format.lower().lstrip(".")
+    normalized = {"ent": "pdb", "mmcif": "cif"}.get(normalized, normalized)
+    if normalized not in {"pdb", "cif"}:
+        raise ArtifactError(f"Unsupported structure format: {structure_format!r}")
+    return normalized
 
 
-def _parse_mmcif_residues(artifact: StructureArtifact) -> Iterator[ParsedResidue]:
-    """Parse author residue ids from mmCIF through the optional BioPython adapter."""
+def _format_from_path(path: Path) -> str:
+    """Infer a coordinate format, including paths ending in ``.gz``."""
+
+    suffixes = [suffix.lower().lstrip(".") for suffix in path.suffixes]
+    if suffixes and suffixes[-1] == "gz":
+        suffixes.pop()
+    if not suffixes:
+        raise ArtifactError(f"Cannot infer structure format from path: {path}")
+    return suffixes[-1]
+
+
+def _gemmi_coordinate_format(structure_format: str) -> gemmi.CoorFormat:
+    """Translate the public format name to Gemmi's coordinate enum."""
+
+    normalized = _normalize_structure_format(structure_format)
+    return gemmi.CoorFormat.Pdb if normalized == "pdb" else gemmi.CoorFormat.Mmcif
+
+
+def _prepare_structure(
+    artifact_id: str,
+    structure: gemmi.Structure,
+) -> gemmi.Structure:
+    """Populate Gemmi entity annotations and reject empty coordinate models."""
+
+    if len(structure) == 0:
+        raise ArtifactError(f"Structure artifact {artifact_id} contains no models")
+    structure.setup_entities()
+    return structure
+
+
+def _parse_structure_path(
+    artifact_id: str,
+    path: Path,
+    structure_format: str,
+) -> gemmi.Structure:
+    """Parse a coordinate path with Gemmi."""
 
     try:
-        from Bio.PDB.MMCIF2Dict import MMCIF2Dict
-    except ImportError as error:
-        raise ArtifactError("BioPython is required to parse mmCIF artifacts") from error
+        structure = gemmi.read_structure(
+            str(path),
+            format=_gemmi_coordinate_format(structure_format),
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ArtifactError(f"Cannot parse structure artifact {artifact_id}: {error}") from error
+    return _prepare_structure(artifact_id, structure)
 
-    if artifact.path is not None:
-        data = MMCIF2Dict(str(artifact.path))
-    else:
-        from io import StringIO
 
-        data = MMCIF2Dict(StringIO(artifact.read_text()))
+def _parse_structure_text(
+    artifact_id: str,
+    text: str,
+    structure_format: str,
+) -> gemmi.Structure:
+    """Parse in-memory PDB or mmCIF coordinates with Gemmi."""
 
-    def values(*keys: str) -> list[str]:
-        """Return the first present mmCIF field as a normalized list."""
-        for key in keys:
-            if key in data:
-                value = data[key]
-                return list(value) if isinstance(value, list) else [value]
-        raise ArtifactError(f"mmCIF atom_site field is missing: {' or '.join(keys)}")
+    try:
+        if structure_format == "pdb":
+            structure = gemmi.read_pdb_string(text)
+        else:
+            document = gemmi.cif.read_string(text)
+            if len(document) == 0:
+                raise ArtifactError(f"mmCIF artifact {artifact_id} contains no data block")
+            structure = gemmi.make_structure_from_block(document[0])
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ArtifactError(f"Cannot parse structure artifact {artifact_id}: {error}") from error
+    return _prepare_structure(artifact_id, structure)
 
-    groups = values("_atom_site.group_PDB")
-    residue_names = values("_atom_site.auth_comp_id", "_atom_site.label_comp_id")
-    chains = values("_atom_site.auth_asym_id", "_atom_site.label_asym_id")
-    sequence_ids = values("_atom_site.auth_seq_id", "_atom_site.label_seq_id")
-    insertions = values("_atom_site.pdbx_PDB_ins_code")
+
+def _serialize_structure(
+    structure: gemmi.Structure,
+    structure_format: str,
+) -> str:
+    """Serialize the current Gemmi object in PDB or mmCIF format."""
+
+    normalized_format = _normalize_structure_format(structure_format)
+    if normalized_format == "pdb":
+        invalid_chains = sorted(
+            {
+                chain.name
+                for model in structure
+                for chain in model
+                if len(chain.name) > 1
+            }
+        )
+        if invalid_chains:
+            raise ArtifactError(
+                "PDB export requires one-character chain ids; use mmCIF for "
+                f"{invalid_chains}"
+            )
+        return structure.make_pdb_string()
+    return structure.make_mmcif_document().as_string()
+
+
+def _model_at(structure: gemmi.Structure, model_index: int) -> gemmi.Model:
+    """Return one explicit model instead of silently merging ensembles."""
+
+    if model_index < 0 or model_index >= len(structure):
+        raise ArtifactError(
+            f"Model index {model_index} is outside a {len(structure)}-model structure"
+        )
+    return structure[model_index]
+
+
+def _local_residue_id(chain: gemmi.Chain, residue: gemmi.Residue) -> LocalResidueId:
+    """Convert a Gemmi residue identifier into the artifact-local key."""
+
+    return LocalResidueId(
+        chain.name or "_",
+        residue.seqid.num,
+        residue.seqid.icode.strip(),
+    )
+
+
+def _iter_polymer_residues(
+    structure: gemmi.Structure,
+    model_index: int,
+) -> Iterator[ParsedResidue]:
+    """Yield polymer residues from one Gemmi model in coordinate order."""
+
     seen: set[LocalResidueId] = set()
-    for group, residue_name, chain, sequence_id, insertion in zip(
-        groups, residue_names, chains, sequence_ids, insertions
-    ):
-        if group not in {"ATOM", "HETATM"}:
-            continue
-        try:
-            numeric_id = int(float(sequence_id))
-        except ValueError as error:
-            raise ArtifactError(f"Invalid mmCIF author residue id: {sequence_id}") from error
-        local_id = LocalResidueId(
-            chain if chain not in {".", "?"} else "_",
-            numeric_id,
-            "" if insertion in {".", "?"} else insertion,
-        )
-        if local_id in seen:
-            continue
-        seen.add(local_id)
-        normalized_name = residue_name.upper()
-        yield ParsedResidue(
-            local_id=local_id,
-            residue_name=normalized_name,
-            one_letter=AA3_TO_1.get(normalized_name, "X"),
-        )
+    for chain in _model_at(structure, model_index):
+        for residue in chain:
+            if residue.entity_type != gemmi.EntityType.Polymer:
+                continue
+            local_id = _local_residue_id(chain, residue)
+            if local_id in seen:
+                raise ArtifactError(
+                    f"Duplicate polymer residue id in model {model_index}: "
+                    f"{local_id.label()}"
+                )
+            seen.add(local_id)
+            residue_name = residue.name.upper()
+            code = gemmi.find_tabulated_residue(residue_name).one_letter_code
+            yield ParsedResidue(
+                local_id=local_id,
+                residue_name=residue_name,
+                one_letter=code.upper() if code.strip() else "X",
+            )
 
 
 def _align_local_to_reference(local: str, reference: str) -> dict[int, int]:
     """Globally align sequences and return local-index to reference-index pairs."""
 
-    rows = len(local) + 1
-    columns = len(reference) + 1
-    gap = -2
-    score = [[0] * columns for _ in range(rows)]
-    trace = [[""] * columns for _ in range(rows)]
-    for row in range(1, rows):
-        score[row][0] = row * gap
-        trace[row][0] = "up"
-    for column in range(1, columns):
-        score[0][column] = column * gap
-        trace[0][column] = "left"
-    for row in range(1, rows):
-        for column in range(1, columns):
-            diagonal = score[row - 1][column - 1] + (
-                2 if local[row - 1] == reference[column - 1] else -1
-            )
-            up = score[row - 1][column] + gap
-            left = score[row][column - 1] + gap
-            best = max(diagonal, up, left)
-            score[row][column] = best
-            trace[row][column] = "diag" if best == diagonal else ("up" if best == up else "left")
-    row = len(local)
-    column = len(reference)
-    result: dict[int, int] = {}
-    while row or column:
-        direction = trace[row][column]
-        if direction == "diag":
-            result[row - 1] = column - 1
-            row -= 1
-            column -= 1
-        elif direction == "up":
-            row -= 1
-        elif direction == "left":
-            column -= 1
-        else:
-            break
-    return result
+    alignment = gemmi.align_string_sequences(tuple(local), tuple(reference), ())
+    aligned_local = alignment.add_gaps(local, 1)
+    aligned_reference = alignment.add_gaps(reference, 2)
+    local_index = 0
+    reference_index = 0
+    pairs: dict[int, int] = {}
+    for local_residue, reference_residue in zip(aligned_local, aligned_reference):
+        if local_residue != "-" and reference_residue != "-":
+            pairs[local_index] = reference_index
+        if local_residue != "-":
+            local_index += 1
+        if reference_residue != "-":
+            reference_index += 1
+    return pairs
 
 
-def _rewrite_pdb_numbering(
-    text: str,
+def _rewrite_structure_numbering(
+    structure: gemmi.Structure,
     residue_map: ResidueMap,
     reference: ReferenceModel,
     *,
+    structure_format: str,
     canonical: bool = False,
 ) -> str:
-    output: list[str] = []
-    for line in text.splitlines(keepends=True):
-        if line[:6].strip() not in {"ATOM", "HETATM"} or len(line) < 27:
-            output.append(line)
-            continue
-        try:
-            local_id = LocalResidueId(
-                line[21].strip() or "_",
-                int(line[22:26]),
-                line[26].strip(),
-            )
-            canonical_id = residue_map.to_canonical(local_id)
-        except (KeyError, ValueError):
-            canonical_id = None
-        if canonical_id is None:
-            output.append(line)
-            continue
-        if canonical:
-            entity = reference.entities[canonical_id.entity_id]
-            author = LocalResidueId(
-                entity.chain_id or canonical_id.entity_id[:1],
-                canonical_id.position,
-            )
-        else:
-            author = reference.author_residue(canonical_id)
-        padded = line.rstrip("\n").ljust(27)
-        rewritten = (
-            padded[:21]
-            + author.chain_id[:1]
-            + f"{author.sequence_id:4d}"
-            + (author.insertion_code[:1] or " ")
-            + padded[27:]
-        )
-        output.append(rewritten + ("\n" if line.endswith("\n") else ""))
-    return "".join(output)
+    """Clone and renumber polymer residues through the canonical map."""
+
+    rewritten = structure.clone()
+    for model in rewritten:
+        for chain in model:
+            output_chain_ids: set[str] = set()
+            for residue in chain:
+                if residue.entity_type != gemmi.EntityType.Polymer:
+                    continue
+                try:
+                    canonical_id = residue_map.to_canonical(
+                        _local_residue_id(chain, residue)
+                    )
+                except KeyError:
+                    canonical_id = None
+                if canonical_id is None:
+                    continue
+                if canonical:
+                    entity = reference.entities[canonical_id.entity_id]
+                    author = LocalResidueId(
+                        entity.chain_id or canonical_id.entity_id[:1],
+                        canonical_id.position,
+                    )
+                else:
+                    author = reference.author_residue(canonical_id)
+                output_chain_ids.add(author.chain_id)
+                residue.seqid = gemmi.SeqId(
+                    author.sequence_id,
+                    author.insertion_code or " ",
+                )
+            if len(output_chain_ids) > 1:
+                raise ArtifactError(
+                    f"One local chain maps to multiple output chains: "
+                    f"{sorted(output_chain_ids)}"
+                )
+            if output_chain_ids:
+                chain.name = next(iter(output_chain_ids))
+
+    return _serialize_structure(rewritten, structure_format)
 
 
 def _one_to_three(one_letter: str) -> str:
-    inverse = {value: key for key, value in AA3_TO_1.items() if key != "MSE"}
-    return inverse.get(one_letter.upper(), "UNK")
+    """Expand a protein one-letter code with Gemmi's residue table."""
+
+    return gemmi.expand_one_letter(one_letter.upper(), gemmi.ResidueKind.AA)

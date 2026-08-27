@@ -9,7 +9,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from ...core.artifacts import ReferenceModel, StructureArtifact
 from ...core.design import Design, DesignSet, ProteinCandidate
@@ -139,7 +139,11 @@ class BoltzGenRefold(Step):
     }
     output_ports = {"designs": PortSpec(DesignSet)}
 
-    def execute(self, inputs, context):
+    def execute(
+        self,
+        inputs: Mapping[str, Any],
+        context: Any,
+    ) -> Mapping[str, Any]:
         """Run co-folding and attach namespaced metrics and mapped CIF artifacts."""
         target: StructureArtifact = inputs["target"]
         designs: DesignSet = inputs["designs"]
@@ -166,10 +170,13 @@ class BoltzGenRefold(Step):
         return {"designs": designs}
 
     def _materialize_target(self, target: StructureArtifact, output_dir: Path) -> Path:
-        if target.path is not None and target.path.exists():
-            return target.path.resolve()
-        suffix = "pdb" if target.structure_format == "ent" else target.structure_format
-        return target.export(output_dir / f"target.{suffix}").resolve()
+        """Export live target coordinates outside BoltzGen's design scan root."""
+
+        input_dir = output_dir / "inputs"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        return target.export(
+            input_dir / f"target.{target.structure_format}",
+        ).resolve()
 
     def _write_binder_csv(
         self,
